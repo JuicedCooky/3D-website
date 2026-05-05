@@ -1,0 +1,28 @@
+{
+  "name": "3d_website",
+  "version": "1.0.0",
+  "description": "��#\u0000 \u00003\u0000D\u0000-\u0000w\u0000e\u0000b\u0000s\u0000i\u0000t\u0000e\u0000\r\u0000 \u0000",
+  "homepage": "https://github.com/JuicedCooky/3D-website#readme",
+  "bugs": {
+    "url": "https://github.com/JuicedCooky/3D-website/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JuicedCooky/3D-website.git"
+  },
+  "license": "ISC",
+  "author": "",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "three": "^0.184.0"
+  },
+  "devDependencies": {
+    "vite": "^8.0.10"
+  }
+}
