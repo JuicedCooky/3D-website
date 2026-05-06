@@ -4,7 +4,11 @@ import nipplejs from 'nipplejs';
 import walkUrl from '../3d_models/doro/doro_walk_2.glb?url';
 import worldUrl from '../3d_models/world.glb?url';
 import grassUrl from '../3d_models/objects/grass.glb?url';
+import schoolUrl from '../3d_models/objects/school.glb?url';
+
 import { initUI } from './ui.js';
+
+
 
 const SPHERE_RADIUS = 8;
 const MOVE_SPEED = 3;
@@ -17,6 +21,22 @@ const CAM_DIST = 10;          // initial camera distance from player
 const GRASS_COUNT     = 10000; // number of grass patches placed on the sphere
 const GRASS_SCALE_MIN = 1.0;   // minimum random scale
 const GRASS_SCALE_MAX = 2.0;   // maximum random scale
+
+// ─── School placement config ──────────────────────────────────────────────────
+const SCHOOL_THETA            = 0.3;  // azimuth around Y axis (radians)
+const SCHOOL_PHI              = 0.5;  // polar angle from north pole (radians)
+const SCHOOL_YAW              = 0.0;  // spin around sphere normal (radians)
+const SCHOOL_SCALE            = 1.0;  // uniform scale
+const SCHOOL_COLLISION_RADIUS = 1.0;  // character push-out radius (world units)
+const SCHOOL_GRASS_RADIUS     = 1.0;  // no-grass exclusion radius (world units)
+
+// Surface normal at the school's location — derived from spherical coords above
+const schoolNormal = new THREE.Vector3(
+    Math.sin(SCHOOL_PHI) * Math.cos(SCHOOL_THETA),
+    Math.cos(SCHOOL_PHI),
+    Math.sin(SCHOOL_PHI) * Math.sin(SCHOOL_THETA)
+).normalize();
+const cosSchoolGrassExclusion = Math.cos(SCHOOL_GRASS_RADIUS / SPHERE_RADIUS);
 
 const settings = {
     shadowMapSize: 2048,
@@ -106,6 +126,7 @@ function spawnGrass() {
             Math.cos(phi),
             Math.sin(phi) * Math.sin(theta)
         );
+        if (normal.dot(schoolNormal) > cosSchoolGrassExclusion) { i--; continue; }
         _alignQ.setFromUnitVectors(_yUp, normal);
         _yawQ.setFromAxisAngle(normal, Math.random() * Math.PI * 2);
         _dummy.position.copy(normal).multiplyScalar(SPHERE_RADIUS);
@@ -125,6 +146,17 @@ loader.load(grassUrl, (gltf) => {
     gltf.scene.traverse((c) => { if (c.isMesh && !grassMeshTemplate) grassMeshTemplate = c; });
     spawnGrass();
 }, undefined, (e) => console.error('grass:', e));
+
+loader.load(schoolUrl, (gltf) => {
+    const school = gltf.scene;
+    school.scale.setScalar(SCHOOL_SCALE);
+    const alignQ = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), schoolNormal);
+    const yawQ   = new THREE.Quaternion().setFromAxisAngle(schoolNormal, SCHOOL_YAW);
+    school.quaternion.copy(yawQ).multiply(alignQ);
+    school.position.copy(schoolNormal).multiplyScalar(SPHERE_RADIUS);
+    school.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+    scene.add(school);
+}, undefined, (e) => console.error('school:', e));
 
 // ─── Input ────────────────────────────────────────────────────────────────────
 const keys = new Set();
@@ -345,6 +377,19 @@ function animate() {
     facingDir.addScaledVector(_up, -facingDir.dot(_up)).normalize();
     camBaseDir.addScaledVector(_up, -camBaseDir.dot(_up)).normalize();
     savedCamBaseDir.addScaledVector(_up, -savedCamBaseDir.dot(_up)).normalize();
+
+    // ── Building collision ────────────────────────────────────────────────────
+    const cosAngle = _up.dot(schoolNormal);
+    const arcDist  = Math.acos(Math.max(-1, Math.min(1, cosAngle))) * SPHERE_RADIUS;
+    if (arcDist < SCHOOL_COLLISION_RADIUS && arcDist > 0.0001) {
+        _rotAxis.crossVectors(schoolNormal, _up).normalize();
+        _q.setFromAxisAngle(_rotAxis, SCHOOL_COLLISION_RADIUS / SPHERE_RADIUS);
+        playerPos.copy(schoolNormal).multiplyScalar(SPHERE_RADIUS).applyQuaternion(_q).setLength(SPHERE_RADIUS);
+        _up.copy(playerPos).normalize();
+        facingDir.addScaledVector(_up, -facingDir.dot(_up)).normalize();
+        camBaseDir.addScaledVector(_up, -camBaseDir.dot(_up)).normalize();
+        savedCamBaseDir.addScaledVector(_up, -savedCamBaseDir.dot(_up)).normalize();
+    }
 
     // ── Snap camera back toward saved position when right-click released ──────
     if (snapBack && !isOrbiting) {
