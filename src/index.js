@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import nipplejs from 'nipplejs';
 import walkUrl from '../3d_models/doro/doro_walk_2.glb?url';
 import worldUrl from '../3d_models/world.glb?url';
 import grassUrl from '../3d_models/objects/grass.glb?url';
@@ -10,7 +11,7 @@ const MOVE_SPEED = 3;
 const TURN_SPEED = 6;
 const HOME_PITCH = 0.4;
 const SNAP_SPEED = 6; // how fast camera snaps back
-const WALK_ANIM_SPEED = 2.0; // walk animation playback rate (1 = normal, 2 = double, 0.5 = half)
+const WALK_ANIM_SPEED = 4.0; // walk animation playback rate (1 = normal, 2 = double, 0.5 = half)
 const CAM_DIST = 10;          // initial camera distance from player
 
 const GRASS_COUNT     = 10000; // number of grass patches placed on the sphere
@@ -129,6 +130,36 @@ loader.load(grassUrl, (gltf) => {
 const keys = new Set();
 window.addEventListener('keydown', (e) => keys.add(e.code));
 window.addEventListener('keyup', (e) => keys.delete(e.code));
+
+// ─── Virtual joystick (touch devices only) ────────────────────────────────────
+const joystick = { x: 0, y: 0 }; // normalised [-1,1] x/y from nipple
+
+if (window.matchMedia('(pointer: coarse)').matches) {
+    const zone = document.createElement('div');
+    zone.id = 'joystick-zone';
+    Object.assign(zone.style, {
+        position: 'fixed',
+        left: '0', bottom: '0',
+        width: '100%', height: '50%',
+        zIndex: '98',
+        touchAction: 'none',
+    });
+    document.body.appendChild(zone);
+
+    const manager = nipplejs.create({
+        zone,
+        mode: 'dynamic',
+        dynamicPage: true,
+        color: 'rgba(255,255,255,0.5)',
+    });
+
+    manager.on('move', (_, data) => {
+        if (!data.vector) return;
+        joystick.x =  data.vector.x;
+        joystick.y = -data.vector.y; // nipple y is inverted vs forward
+    });
+    manager.on('end', () => { joystick.x = 0; joystick.y = 0; });
+}
 
 // ─── Camera state ─────────────────────────────────────────────────────────────
 // camBaseDir: world-space unit vector pointing FROM player TOWARD camera (horizontal, tangent to sphere).
@@ -273,6 +304,10 @@ function animate() {
     if (keys.has('KeyS')) _moveDir.sub(_camFwd);
     if (keys.has('KeyA')) _moveDir.sub(_camRight);
     if (keys.has('KeyD')) _moveDir.add(_camRight);
+    if (joystick.x !== 0 || joystick.y !== 0) {
+        _moveDir.addScaledVector(_camFwd,  joystick.y);
+        _moveDir.addScaledVector(_camRight, joystick.x);
+    }
 
     const moving = _moveDir.lengthSq() > 0;
 

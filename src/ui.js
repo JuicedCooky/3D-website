@@ -1,6 +1,8 @@
 import bgUrl      from '../3d_models/ui/tile_0000.png?url';
 import btnUrl     from '../3d_models/ui/tile_0001.png?url';
 import inputBgUrl from '../3d_models/ui/tile_0002.png?url';
+import settingsBtnUrl from '../3d_models/ui/tile_0003.png?url';
+import settingsIcon from '../assets/settings.png?url';
 
 export function initUI(settings, { onGrassApply, onShadowChange }) {
     const style = document.createElement('style');
@@ -106,25 +108,48 @@ export function initUI(settings, { onGrassApply, onShadowChange }) {
         .cfg-btn:hover  { filter: brightness(1.1); }
         .cfg-btn:active { transform: scale(0.97); }
 
-        #ui-hint {
+        #ui-settings-btn {
             position: fixed;
             top: 14px;
             right: 16px;
-            font-family: 'Courier New', monospace;
-            font-size: 11px;
-            color: rgba(255,255,255,0.4);
+            width: 210px;
+            height: 66px;
             z-index: 99;
-            pointer-events: none;
-            letter-spacing: 1px;
+            cursor: pointer;
+            background: none;
+            border: 16px solid transparent;
+            border-image: url('${settingsBtnUrl}') 11 fill repeat;
+            image-rendering: pixelated;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 9px;
+            font-family: 'Courier New', monospace;
+            font-size: 17px;
+            font-weight: bold;
+            color: #1a0a00;
             text-transform: uppercase;
+            letter-spacing: 2px;
+            transition: filter 0.1s;
         }
+        #ui-settings-btn img {
+            width: 24px;
+            height: 24px;
+            image-rendering: pixelated;
+            display: block;
+            flex-shrink: 0;
+        }
+        #ui-settings-btn:hover  { filter: brightness(1.15); }
+        #ui-settings-btn:active { transform: scale(0.94); }
     `;
     document.head.appendChild(style);
 
-    const hint = document.createElement('div');
-    hint.id = 'ui-hint';
-    hint.textContent = '[Tab] Settings';
-    document.body.appendChild(hint);
+    const settingsBtn = document.createElement('button');
+    settingsBtn.id = 'ui-settings-btn';
+    settingsBtn.title = 'Settings [Tab]';
+    settingsBtn.innerHTML = `<img src="${settingsIcon}" alt=""><span>Settings</span>`;
+    document.body.appendChild(settingsBtn);
 
     const panel = document.createElement('div');
     panel.id = 'settings-panel';
@@ -177,6 +202,10 @@ export function initUI(settings, { onGrassApply, onShadowChange }) {
 
     panel.querySelector('#cfg-close').addEventListener('click', () => {
         panel.classList.remove('visible');
+    });
+
+    settingsBtn.addEventListener('click', () => {
+        panel.classList.toggle('visible');
     });
 
     window.addEventListener('keydown', (e) => {
