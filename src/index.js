@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { CSS3DRenderer, CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRenderer.js';
 import nipplejs from 'nipplejs';
 import walkUrl from '../3d_models/doro/doro_walk_2.glb?url';
 import worldUrl from '../3d_models/world.glb?url';
 import grassUrl from '../3d_models/objects/grass.glb?url';
 import schoolUrl from '../3d_models/objects/school.glb?url';
 
-import { initUI } from './ui.js';
+import { initUI, createBuildingTooltipSystem } from './ui.js';
 
 
 
@@ -30,6 +31,18 @@ const SCHOOL_SCALE            = 1.0;  // uniform scale
 const SCHOOL_COLLISION_RADIUS = 1.0;  // character push-out radius (world units)
 const SCHOOL_GRASS_RADIUS     = 1.0;  // no-grass exclusion radius (world units)
 
+// UI building placement
+const SCHOOL_NEAR_ARC_DIST    = 3.5;  // arc distance at which the tooltip expands (world units)
+const UI_HEIGHT = 2.0;
+
+const occlusionMaterial = new THREE.MeshBasicMaterial({
+    color: 0x000000,
+    transparent: false,
+    blending: THREE.NoBlending,
+    side: THREE.DoubleSide,
+    colorWrite: false
+});
+
 // Surface normal at the school's location — derived from spherical coords above
 const schoolNormal = new THREE.Vector3(
     Math.sin(SCHOOL_PHI) * Math.cos(SCHOOL_THETA),
@@ -37,25 +50,38 @@ const schoolNormal = new THREE.Vector3(
     Math.sin(SCHOOL_PHI) * Math.sin(SCHOOL_THETA)
 ).normalize();
 const cosSchoolGrassExclusion = Math.cos(SCHOOL_GRASS_RADIUS / SPHERE_RADIUS);
+// World-space anchor for the school tooltip (slightly above sphere surface)
+const schoolTooltipPos = schoolNormal.clone().multiplyScalar(SPHERE_RADIUS + UI_HEIGHT);
 
 const settings = {
     shadowMapSize: 2048,
     grassCount:    GRASS_COUNT,
     grassScaleMin: GRASS_SCALE_MIN,
     grassScaleMax: GRASS_SCALE_MAX,
+    panSpeed:      4,
 };
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x000814);
+// Background rendered as body CSS so the alpha WebGL canvas is transparent,
+// allowing CSS3DRenderer content behind it to show through correctly.
+document.body.style.backgroundColor = '#000814';
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 1000);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+// WebGL renderer — alpha:true so transparent pixels reveal the CSS3D layer beneath
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.domElement.style.cssText = 'position:absolute;top:0;left:0;z-index:1;';
 document.body.appendChild(renderer.domElement);
+
+// CSS3D renderer — sits behind WebGL (z-index 0); WebGL opaque pixels occlude it
+const cssRenderer = new CSS3DRenderer();
+cssRenderer.setSize(window.innerWidth, window.innerHeight);
+cssRenderer.domElement.style.cssText = 'position:absolute;top:0;left:0;z-index:0;pointer-events:none;';
+document.body.insertBefore(cssRenderer.domElement, renderer.domElement);
 
 // Stars
 {
@@ -185,10 +211,10 @@ if (window.matchMedia('(pointer: coarse)').matches) {
         color: 'rgba(255,255,255,0.5)',
     });
 
-    manager.on('move', (_, data) => {
-        if (!data.vector) return;
-        joystick.x =  data.vector.x;
-        joystick.y = -data.vector.y; // nipple y is inverted vs forward
+    manager.on('move', (event) => {
+        if (!event.data?.vector) return;
+        joystick.x =  event.data.vector.x;
+        joystick.y =  event.data.vector.y;
     });
     manager.on('end', () => { joystick.x = 0; joystick.y = 0; });
 }
@@ -229,12 +255,12 @@ window.addEventListener('mouseup', (e) => {
 window.addEventListener('mousemove', (e) => {
     if (!isOrbiting) return;
     // Rotate camBaseDir around sphere normal by horizontal mouse delta
-    const yawQ = new THREE.Quaternion().setFromAxisAngle(_currentUp, -e.movementX * 0.004);
+    const yawQ = new THREE.Quaternion().setFromAxisAngle(_currentUp, -e.movementX * settings.panSpeed * 0.001);
     camBaseDir.applyQuaternion(yawQ);
     // Re-project onto tangent plane (floating-point drift correction)
     camBaseDir.addScaledVector(_currentUp, -camBaseDir.dot(_currentUp)).normalize();
     // Vertical mouse delta changes elevation
-    camPitch = Math.max(0.05, Math.min(1.3, camPitch + e.movementY * 0.004));
+    camPitch = Math.max(0.05, Math.min(1.3, camPitch + e.movementY * settings.panSpeed * 0.001));
 });
 
 renderer.domElement.addEventListener('wheel', (e) => {
@@ -286,10 +312,10 @@ renderer.domElement.addEventListener('touchmove', (e) => {
         const dy = t.clientY - touchOrbit.lastY;
         touchOrbit.lastX = t.clientX;
         touchOrbit.lastY = t.clientY;
-        const yawQ = new THREE.Quaternion().setFromAxisAngle(_currentUp, -dx * 0.004);
+        const yawQ = new THREE.Quaternion().setFromAxisAngle(_currentUp, -dx * settings.panSpeed * 0.001);
         camBaseDir.applyQuaternion(yawQ);
         camBaseDir.addScaledVector(_currentUp, -camBaseDir.dot(_currentUp)).normalize();
-        camPitch = Math.max(0.05, Math.min(1.3, camPitch + dy * 0.004));
+        camPitch = Math.max(0.05, Math.min(1.3, camPitch + dy * settings.panSpeed * 0.001));
     }
 }, { passive: false });
 
@@ -324,6 +350,7 @@ const _q = new THREE.Quaternion();
 const _mat = new THREE.Matrix4();
 const _targetCamPos = new THREE.Vector3();
 const _lookAt = new THREE.Vector3();
+const _projVec = new THREE.Vector3();
 
 // ─── Character model ──────────────────────────────────────────────────────────
 let doro = null;
@@ -350,6 +377,7 @@ window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    cssRenderer.setSize(window.innerWidth, window.innerHeight);
 });
 
 const clock = new THREE.Clock();
@@ -369,6 +397,23 @@ initUI(settings, {
         }
     },
 });
+
+const tooltipSystem = createBuildingTooltipSystem(['school']);
+
+// Wrap each tooltip element in a CSS3DObject so Three.js projects it into 3D space.
+// WebGL objects rendered on the alpha canvas above z-index 0 will naturally occlude it.
+const cssScene = new THREE.Scene();
+const schoolCss3d = new CSS3DObject(tooltipSystem.getElement('school'));
+schoolCss3d.scale.set(0.01, 0.01, 0.01);
+schoolCss3d.position.copy(schoolTooltipPos);
+cssScene.add(schoolCss3d);
+
+const maskGeo = new THREE.PlaneGeometry(200, 100); 
+const schoolMask = new THREE.Mesh(maskGeo, occlusionMaterial);
+
+schoolMask.position.copy(schoolTooltipPos);
+schoolMask.scale.copy(schoolCss3d.scale); // Keep them perfectly aligned
+scene.add(schoolMask);
 
 function animate() {
     requestAnimationFrame(animate);
@@ -485,6 +530,21 @@ function animate() {
     _lookAt.copy(playerPos).addScaledVector(_up, 0.8);
     camera.lookAt(_lookAt);
 
+    // ── Building tooltips (CSS3D) ─────────────────────────────────────────────
+    // Billboard: keep the tooltip facing the camera each frame
+    schoolCss3d.quaternion.copy(camera.quaternion);
+    // Visibility: hide when school is behind the camera (CSS3DRenderer has no clip)
+    _projVec.copy(schoolTooltipPos).project(camera);
+    tooltipSystem.update([{
+        id: 'school',
+        visible: _projVec.z < 1.0,
+        isNear:  arcDist < SCHOOL_NEAR_ARC_DIST,
+    }]);
+
+    schoolCss3d.quaternion.copy(camera.quaternion);
+    schoolMask.quaternion.copy(camera.quaternion);
+
     renderer.render(scene, camera);
+    cssRenderer.render(cssScene, camera);
 }
 animate();

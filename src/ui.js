@@ -1,8 +1,15 @@
-import bgUrl      from '../3d_models/ui/tile_0000.png?url';
-import btnUrl     from '../3d_models/ui/tile_0001.png?url';
-import inputBgUrl from '../3d_models/ui/tile_0002.png?url';
-import settingsBtnUrl from '../3d_models/ui/tile_0003.png?url';
-import settingsIcon from '../assets/settings.png?url';
+import bgUrl      from '../assets/ui/tile_0000.png?url';
+import btnUrl     from '../assets/ui/tile_0001.png?url';
+import inputBgUrl from '../assets/ui/tile_0002.png?url';
+import settingsBtnUrl from '../assets/ui/tile_0003.png?url';
+import settingsIcon from '../assets/ui/settings_2.png?url';
+
+import tooltipBgUrl from '../assets/ui/tooltip.png?url';
+import enterIconUrl from '../assets/ui/enter.png?url';
+import border1Url   from '../assets/ui/tooltip_boarder/UI_TravelBook_SlotCursor01a_1.png?url';
+import border2Url   from '../assets/ui/tooltip_boarder/UI_TravelBook_SlotCursor01a_2.png?url';
+import border3Url   from '../assets/ui/tooltip_boarder/UI_TravelBook_SlotCursor01a_3.png?url';
+import border4Url   from '../assets/ui/tooltip_boarder/UI_TravelBook_SlotCursor01a_4.png?url';
 
 export function initUI(settings, { onGrassApply, onShadowChange }) {
     const style = document.createElement('style');
@@ -167,6 +174,12 @@ export function initUI(settings, { onGrassApply, onShadowChange }) {
             </select>
         </div>
 
+        <div class="cfg-section">Controls</div>
+        <div class="cfg-row">
+            <label>Pan Speed</label>
+            <input type="number" id="cfg-pan-speed" min="1" max="20" step="1" value="${settings.panSpeed}">
+        </div>
+
         <div class="cfg-section">Grass</div>
         <div class="cfg-row">
             <label>Count</label>
@@ -187,6 +200,10 @@ export function initUI(settings, { onGrassApply, onShadowChange }) {
     document.body.appendChild(panel);
 
     panel.querySelector('#cfg-shadow').value = String(settings.shadowMapSize);
+
+    panel.querySelector('#cfg-pan-speed').addEventListener('change', (e) => {
+        settings.panSpeed = Math.max(1, Number(e.target.value));
+    });
 
     panel.querySelector('#cfg-shadow').addEventListener('change', (e) => {
         settings.shadowMapSize = Number(e.target.value);
@@ -214,4 +231,112 @@ export function initUI(settings, { onGrassApply, onShadowChange }) {
             panel.classList.toggle('visible');
         }
     });
+}
+
+export function createBuildingTooltipSystem(buildingIds) {
+    const BORDER_FRAMES = [border1Url, border2Url, border3Url, border4Url];
+    let frameIdx = 0;
+
+    const style = document.createElement('style');
+    style.textContent = `
+        .bld-tooltip {
+            display: inline-block;
+            pointer-events: none;
+            image-rendering: pixelated;
+            opacity: 1;
+            transition: opacity 0.3s;
+        }
+        .bld-tooltip.tt-hidden { opacity: 0; }
+
+        .bld-tt-shell {
+            position: relative;
+            width: 44px;
+            height: 44px;
+            background: url('${tooltipBgUrl}') center / 100% 100% no-repeat;
+            transition: width 0.25s ease, height 0.25s ease;
+        }
+        .bld-tooltip.tt-near .bld-tt-shell {
+            width: 112px;
+            height: 80px;
+        }
+
+        .bld-tt-enter {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .bld-tooltip.tt-near .bld-tt-enter { opacity: 1; }
+        .bld-tt-enter img {
+            width: 40px;
+            height: 40px;
+            image-rendering: pixelated;
+        }
+
+        .bld-tt-border {
+            position: absolute;
+            inset: -8px;
+            background: no-repeat center / 100% 100%;
+            image-rendering: pixelated;
+            opacity: 0;
+            transition: opacity 0.2s;
+            pointer-events: none;
+        }
+        .bld-tooltip.tt-near .bld-tt-border { opacity: 1; }
+    `;
+    document.head.appendChild(style);
+
+    const entries = buildingIds.map((id) => {
+        const el = document.createElement('div');
+        el.className = 'bld-tooltip tt-hidden';
+
+        const shell = document.createElement('div');
+        shell.className = 'bld-tt-shell';
+
+        const enterDiv = document.createElement('div');
+        enterDiv.className = 'bld-tt-enter';
+        const enterImg = document.createElement('img');
+        enterImg.src = enterIconUrl;
+        enterImg.alt = '';
+        enterDiv.appendChild(enterImg);
+
+        const borderDiv = document.createElement('div');
+        borderDiv.className = 'bld-tt-border';
+        borderDiv.style.backgroundImage = `url('${BORDER_FRAMES[0]}')`;
+
+        shell.appendChild(enterDiv);
+        shell.appendChild(borderDiv);
+        el.appendChild(shell);
+        // CSS3DRenderer manages DOM placement — do NOT append to body here
+
+        return { id, el, borderDiv };
+    });
+
+    setInterval(() => {
+        frameIdx = (frameIdx + 1) % BORDER_FRAMES.length;
+        const url = BORDER_FRAMES[frameIdx];
+        entries.forEach(({ borderDiv }) => {
+            borderDiv.style.backgroundImage = `url('${url}')`;
+        });
+    }, 150);
+
+    return {
+        getElement(id) {
+            const entry = entries.find(e => e.id === id);
+            return entry ? entry.el : null;
+        },
+        update(states) {
+            // CSS3DRenderer handles screen positioning — only toggle state classes here
+            states.forEach(({ id, visible, isNear }) => {
+                const entry = entries.find(e => e.id === id);
+                if (!entry) return;
+                const { el } = entry;
+                el.classList.toggle('tt-hidden', !visible);
+                el.classList.toggle('tt-near', isNear && visible);
+            });
+        }
+    };
 }
