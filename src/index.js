@@ -242,6 +242,73 @@ renderer.domElement.addEventListener('wheel', (e) => {
     camDist = Math.max(2, Math.min(20, camDist + e.deltaY * 0.01));
 }, { passive: false });
 
+// ─── Touch: top-half camera orbit + two-finger pinch zoom ────────────────────
+let touchOrbit = null;  // { id, lastX, lastY }
+let pinchDist  = null;  // px separation between pinch fingers
+
+function pinchSep(touches) {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+renderer.domElement.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (e.touches.length >= 2) {
+        // Switch to pinch — cancel any active orbit
+        if (touchOrbit) { touchOrbit = null; isOrbiting = false; snapBack = true; }
+        pinchDist = pinchSep(e.touches);
+        return;
+    }
+    const t = e.changedTouches[0];
+    if (!touchOrbit && t.clientY < window.innerHeight * 0.5) {
+        touchOrbit = { id: t.identifier, lastX: t.clientX, lastY: t.clientY };
+        isOrbiting = true;
+        snapBack = false;
+        savedCamBaseDir.copy(camBaseDir);
+        savedCamPitch = camPitch;
+    }
+}, { passive: false });
+
+renderer.domElement.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    if (e.touches.length >= 2 && pinchDist !== null) {
+        const dist = pinchSep(e.touches);
+        camDist = Math.max(2, Math.min(20, camDist - (dist - pinchDist) * 0.02));
+        pinchDist = dist;
+        return;
+    }
+    if (!touchOrbit) return;
+    for (let i = 0; i < e.changedTouches.length; i++) {
+        const t = e.changedTouches[i];
+        if (t.identifier !== touchOrbit.id) continue;
+        const dx = t.clientX - touchOrbit.lastX;
+        const dy = t.clientY - touchOrbit.lastY;
+        touchOrbit.lastX = t.clientX;
+        touchOrbit.lastY = t.clientY;
+        const yawQ = new THREE.Quaternion().setFromAxisAngle(_currentUp, -dx * 0.004);
+        camBaseDir.applyQuaternion(yawQ);
+        camBaseDir.addScaledVector(_currentUp, -camBaseDir.dot(_currentUp)).normalize();
+        camPitch = Math.max(0.05, Math.min(1.3, camPitch + dy * 0.004));
+    }
+}, { passive: false });
+
+function onTouchEnd(e) {
+    e.preventDefault();
+    if (touchOrbit) {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            if (e.changedTouches[i].identifier !== touchOrbit.id) continue;
+            touchOrbit = null;
+            isOrbiting = false;
+            snapBack = true;
+            break;
+        }
+    }
+    if (e.touches.length < 2) pinchDist = null;
+}
+renderer.domElement.addEventListener('touchend',    onTouchEnd, { passive: false });
+renderer.domElement.addEventListener('touchcancel', onTouchEnd, { passive: false });
+
 // ─── Player state ─────────────────────────────────────────────────────────────
 const playerPos = new THREE.Vector3(0, SPHERE_RADIUS, 0); // north pole
 let facingDir = new THREE.Vector3(1, 0, 0);               // tangent, world-space
