@@ -417,10 +417,10 @@ export function createBookPanel() {
             position: fixed;
             top: 50%;
             left: 50%;
-            width: ${W}px;
-            height: ${H}px;
-            margin-left: ${-W / 2}px;
-            margin-top: ${-H / 2}px;
+            width: min(${W}px, 95vw);
+            height: min(${H}px, calc(min(${W}px, 95vw) * ${H / W}));
+            margin-left: calc(min(${W}px, 95vw) / -2);
+            margin-top: calc(min(${H}px, calc(min(${W}px, 95vw) * ${H / W})) / -2);
             background: url('${bookCoverUrl}') center / 100% 100% no-repeat;
             image-rendering: pixelated;
             display: none;

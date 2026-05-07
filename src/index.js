@@ -41,9 +41,10 @@ const RANDOM_OBJ_COLLISION_RADIUS = RANDOM_OBJ_SCALE * 0.45; // player push-out 
 // ─── Physics ─────────────────────────────────────────────────────────────────
 const PHYS_HALF_EXT = RANDOM_OBJ_SCALE * 0.35; // fallback half-extent (unused when bbox auto-compute succeeds)
 
-const GRASS_COUNT     = 10000; // number of grass patches placed on the sphere
-const GRASS_SCALE_MIN = 1.0;   // minimum random scale
-const GRASS_SCALE_MAX = 2.0;   // maximum random scale
+const GRASS_COUNT          = 10000; // number of grass patches placed on the sphere
+const GRASS_SCALE_MIN      = 1.0;   // minimum random scale
+const GRASS_SCALE_MAX      = 2.0;   // maximum random scale
+const GRASS_SURFACE_OFFSET = -0.050;   // radial offset above sphere surface
 
 // ─── School placement config ──────────────────────────────────────────────────
 const SCHOOL_THETA            = 0.3;  // azimuth around Y axis (radians)
@@ -105,6 +106,29 @@ function sampleImageColor(url) {
     });
 }
 
+function detectForegroundEdge(url) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            const w = img.naturalWidth, h = img.naturalHeight;
+            if (!w || !h) { resolve(null); return; }
+            const canvas = document.createElement('canvas');
+            canvas.width = w; canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            const rowFill = (y) => {
+                const d = ctx.getImageData(0, y, w, 1).data;
+                let n = 0;
+                for (let i = 3; i < d.length; i += 4) if (d[i] > 10) n++;
+                return n / w;
+            };
+            resolve(rowFill(0) >= 0.8 ? 'top' : rowFill(h - 1) >= 0.8 ? 'bottom' : null);
+        };
+        img.onerror = () => resolve(null);
+        img.src = url;
+    });
+}
+
 // Background parallax — layers behind the transparent WebGL canvas.
 // Each folder contains numbered PNGs (1 = farthest sky, N = closest foreground).
 let parallax = null;
@@ -144,14 +168,32 @@ let parallax = null;
 
     const container = document.createElement('div');
     container.style.cssText = 'position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none;';
-    const divs = layers.map((url, i) => {
+    const divs = layers.map((url) => {
         const d = document.createElement('div');
-        const sz = i === 0 ? `${settings.bgLayerSize}%` : `${settings.fgLayerSize}%`;
-        d.style.cssText = `position:absolute;width:130%;height:130%;top:-15%;left:-15%;background:url('${url}') center/${sz} no-repeat;will-change:transform;`;
+        d.style.cssText = `position:absolute;width:130%;height:130%;top:-15%;left:-15%;background-image:url('${url}');background-repeat:no-repeat;will-change:transform;`;
         container.appendChild(d);
         return d;
     });
     document.body.appendChild(container);
+
+    const fgEdges = fgUrls.map(() => null);
+    function applyOrientation() {
+        const portrait = window.innerHeight > window.innerWidth;
+        divs.forEach((d, i) => {
+            if (i === 0) {
+                d.style.backgroundSize = portrait ? 'cover' : `${settings.bgLayerSize}%`;
+                d.style.backgroundPosition = 'center';
+            } else {
+                const edge = fgEdges[i - 1];
+                d.style.backgroundSize = `${settings.fgLayerSize}%`;
+                d.style.backgroundPosition = (portrait && edge) ? `center ${edge}` : 'center';
+            }
+        });
+    }
+    applyOrientation();
+    fgUrls.forEach((url, idx) => {
+        detectForegroundEdge(url).then(edge => { fgEdges[idx] = edge; applyOrientation(); });
+    });
 
     const _p = new THREE.Vector3();
     parallax = {
@@ -164,11 +206,8 @@ let parallax = null;
                 d.style.transform = `translate(${ox}px,${oy}px)`;
             });
         },
-        setLayerSizes(bgSize, fgSize) {
-            divs.forEach((d, i) => {
-                d.style.backgroundSize = i === 0 ? `${bgSize}%` : `${fgSize}%`;
-            });
-        },
+        setLayerSizes() { applyOrientation(); },
+        applyOrientation,
     };
 }
 
@@ -180,12 +219,12 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.domElement.style.cssText = 'position:absolute;top:0;left:0;z-index:1;';
+renderer.domElement.style.cssText = 'position:fixed;top:0;left:0;z-index:1;';
 document.body.appendChild(renderer.domElement);
 
 const cssRenderer = new CSS3DRenderer();
 cssRenderer.setSize(window.innerWidth, window.innerHeight);
-cssRenderer.domElement.style.cssText = 'position:absolute;top:0;left:0;z-index:3;pointer-events:none;';
+cssRenderer.domElement.style.cssText = 'position:fixed;top:0;left:0;z-index:3;pointer-events:none;';
 document.body.insertBefore(cssRenderer.domElement, renderer.domElement);
 
 // Lights
@@ -248,7 +287,7 @@ function spawnGrass() {
         if (normal.dot(schoolNormal) > cosSchoolGrassExclusion) { i--; continue; }
         _alignQ.setFromUnitVectors(_yUp, normal);
         _yawQ.setFromAxisAngle(normal, Math.random() * Math.PI * 2);
-        _dummy.position.copy(normal).multiplyScalar(SPHERE_RADIUS);
+        _dummy.position.copy(normal).multiplyScalar(SPHERE_RADIUS + GRASS_SURFACE_OFFSET);
         _dummy.quaternion.copy(_yawQ).multiply(_alignQ);
         _dummy.scale.setScalar(
             settings.grassScaleMin + Math.random() * (settings.grassScaleMax - settings.grassScaleMin)
@@ -466,6 +505,7 @@ window.addEventListener('resize', () => {
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
     cssRenderer.setSize(window.innerWidth, window.innerHeight);
+    if (parallax) parallax.applyOrientation();
 });
 
 const clock = new THREE.Clock();
