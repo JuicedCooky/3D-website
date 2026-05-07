@@ -213,6 +213,19 @@ let parallax = null;
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 1000);
 
+function updateCameraFov() {
+    const aspect = window.innerWidth / window.innerHeight;
+    camera.aspect = aspect;
+    // On portrait screens (aspect < 1) the vertical FOV is fixed but horizontal becomes very
+    // narrow (~30° on a phone), making the scene appear zoomed in. Expand vertical FOV so the
+    // horizontal FOV stays at 60° regardless of orientation.
+    camera.fov = aspect >= 1
+        ? 60
+        : 2 * THREE.MathUtils.radToDeg(Math.atan(Math.tan(THREE.MathUtils.degToRad(30)) / aspect));
+    camera.updateProjectionMatrix();
+}
+updateCameraFov();
+
 // WebGL renderer — alpha:true so transparent pixels reveal the CSS3D layer beneath
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -466,6 +479,20 @@ const cam = initCameraControls(renderer.domElement, settings, HOME_PITCH, CAM_DI
 const playerPos = new THREE.Vector3(0, SPHERE_RADIUS, 0); // north pole
 let facingDir = new THREE.Vector3(1, 0, 0);               // tangent, world-space
 
+// Pre-position camera so the first frame renders correctly even before the character loads.
+// Without this, the camera sits at the origin (inside the sphere) until the GLB finishes
+// downloading, which on mobile produces a disoriented view of the sphere interior.
+{
+    const _initUp  = new THREE.Vector3(0, 1, 0); // north-pole normal = playerPos.normalize()
+    const _initDir = new THREE.Vector3(0, 0, 1); // cam.baseDir initial value
+    camera.position
+        .copy(playerPos)
+        .addScaledVector(_initDir, CAM_DIST * Math.cos(HOME_PITCH))
+        .addScaledVector(_initUp,  CAM_DIST * Math.sin(HOME_PITCH));
+    camera.up.copy(_initUp);
+    camera.lookAt(playerPos.clone().addScaledVector(_initUp, 0.8));
+}
+
 // Pre-allocated temporaries
 const _up = new THREE.Vector3();
 const _right = new THREE.Vector3();
@@ -501,8 +528,7 @@ loader.load(walkUrl, (gltf) => {
 }, undefined, (e) => console.error('walk:', e));
 
 window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
+    updateCameraFov();
     renderer.setSize(window.innerWidth, window.innerHeight);
     cssRenderer.setSize(window.innerWidth, window.innerHeight);
     if (parallax) parallax.applyOrientation();
