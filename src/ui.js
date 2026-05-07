@@ -4,12 +4,13 @@ import inputBgUrl from '../assets/ui/tile_0002.png?url';
 import settingsBtnUrl from '../assets/ui/tile_0003.png?url';
 import settingsIcon from '../assets/ui/settings_2.png?url';
 
-import tooltipBgUrl from '../assets/ui/tooltip.png?url';
-import enterIconUrl from '../assets/ui/enter.png?url';
-import border1Url   from '../assets/ui/tooltip_boarder/UI_TravelBook_SlotCursor01a_1.png?url';
-import border2Url   from '../assets/ui/tooltip_boarder/UI_TravelBook_SlotCursor01a_2.png?url';
-import border3Url   from '../assets/ui/tooltip_boarder/UI_TravelBook_SlotCursor01a_3.png?url';
-import border4Url   from '../assets/ui/tooltip_boarder/UI_TravelBook_SlotCursor01a_4.png?url';
+import tooltipBgUrl  from '../assets/ui/tooltip.png?url';
+import enterIconUrl  from '../assets/ui/enter.png?url';
+import bookCoverUrl  from '../assets/ui/UI_TravelBook_BookCover01a.png?url';
+import border1Url   from '../assets/ui/tooltip_border/UI_TravelBook_SlotCursor01a_1.png?url';
+import border2Url   from '../assets/ui/tooltip_border/UI_TravelBook_SlotCursor01a_2.png?url';
+import border3Url   from '../assets/ui/tooltip_border/UI_TravelBook_SlotCursor01a_3.png?url';
+import border4Url   from '../assets/ui/tooltip_border/UI_TravelBook_SlotCursor01a_4.png?url';
 
 export function initUI(settings, { onGrassApply, onShadowChange }) {
     const style = document.createElement('style');
@@ -155,7 +156,7 @@ export function initUI(settings, { onGrassApply, onShadowChange }) {
     const settingsBtn = document.createElement('button');
     settingsBtn.id = 'ui-settings-btn';
     settingsBtn.title = 'Settings [Tab]';
-    settingsBtn.innerHTML = `<img src="${settingsIcon}" alt=""><span>Settings</span>`;
+    settingsBtn.innerHTML = `<img src="${settingsIcon}" alt=""><span>Settings [tab]</span>`;
     document.body.appendChild(settingsBtn);
 
     const panel = document.createElement('div');
@@ -338,5 +339,104 @@ export function createBuildingTooltipSystem(buildingIds) {
                 el.classList.toggle('tt-near', isNear && visible);
             });
         }
+    };
+}
+
+export function createBookPanel() {
+    const W = 480, H = 360;
+
+    const style = document.createElement('style');
+    style.textContent = `
+        #book-panel {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            width: ${W}px;
+            height: ${H}px;
+            margin-left: ${-W / 2}px;
+            margin-top: ${-H / 2}px;
+            background: url('${bookCoverUrl}') center / 100% 100% no-repeat;
+            image-rendering: pixelated;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-end;
+            padding-bottom: 28px;
+            box-sizing: border-box;
+            z-index: 200;
+        }
+        #book-panel-close {
+            display: block;
+            width: 140px;
+            padding: 8px 0;
+            background-image: url('${btnUrl}');
+            background-size: 100% 100%;
+            image-rendering: pixelated;
+            border: none;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            font-weight: bold;
+            color: #1a0a00;
+            background-color: transparent;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            transition: filter 0.1s;
+        }
+        #book-panel-close:hover  { filter: brightness(1.1); }
+        #book-panel-close:active { transform: scale(0.97); }
+    `;
+    document.head.appendChild(style);
+
+    const panel = document.createElement('div');
+    panel.id = 'book-panel';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.id = 'book-panel-close';
+    closeBtn.textContent = 'Close  [Esc]';
+    panel.appendChild(closeBtn);
+    document.body.appendChild(panel);
+
+    let _open = false;
+
+    const close = () => {
+        if (!_open) return;
+        _open = false;
+        panel.style.transition = 'transform 0.25s ease-in, opacity 0.2s ease';
+        panel.style.transform = 'scale(0.05)';
+        panel.style.opacity = '0';
+        // setTimeout instead of transitionend — transitionend silently drops if the
+        // transition never starts (e.g. close() called during the 2-rAF open gap)
+        setTimeout(() => { if (!_open) panel.style.display = 'none'; }, 300);
+    };
+
+    closeBtn.addEventListener('click', close);
+    window.addEventListener('keydown', (e) => { if (e.code === 'Escape') close(); });
+
+    return {
+        open(tooltipScreenX, tooltipScreenY) {
+            if (_open) return;
+            _open = true;
+
+            // transform-origin set so the scale animation grows from the tooltip's screen position
+            const originX = tooltipScreenX - window.innerWidth  / 2 + W / 2;
+            const originY = tooltipScreenY - window.innerHeight / 2 + H / 2;
+            panel.style.transformOrigin = `${originX}px ${originY}px`;
+            panel.style.transition = 'none';
+            panel.style.transform = 'scale(0.05)';
+            panel.style.opacity = '0';
+            panel.style.display = 'flex';
+
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    if (!_open) return; // closed before rAFs fired — don't show
+                    panel.style.transition = 'transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.25s ease';
+                    panel.style.transform = 'scale(1)';
+                    panel.style.opacity = '1';
+                });
+            });
+        },
+        close,
+        get isOpen() { return _open; },
     };
 }

@@ -7,7 +7,7 @@ import worldUrl from '../3d_models/world.glb?url';
 import grassUrl from '../3d_models/objects/grass.glb?url';
 import schoolUrl from '../3d_models/objects/school.glb?url';
 
-import { initUI, createBuildingTooltipSystem } from './ui.js';
+import { initUI, createBuildingTooltipSystem, createBookPanel } from './ui.js';
 
 
 
@@ -35,13 +35,6 @@ const SCHOOL_GRASS_RADIUS     = 1.0;  // no-grass exclusion radius (world units)
 const SCHOOL_NEAR_ARC_DIST    = 3.5;  // arc distance at which the tooltip expands (world units)
 const UI_HEIGHT = 2.0;
 
-const occlusionMaterial = new THREE.MeshBasicMaterial({
-    color: 0x000000,
-    transparent: false,
-    blending: THREE.NoBlending,
-    side: THREE.DoubleSide,
-    colorWrite: false
-});
 
 // Surface normal at the school's location — derived from spherical coords above
 const schoolNormal = new THREE.Vector3(
@@ -77,10 +70,9 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.domElement.style.cssText = 'position:absolute;top:0;left:0;z-index:1;';
 document.body.appendChild(renderer.domElement);
 
-// CSS3D renderer — sits behind WebGL (z-index 0); WebGL opaque pixels occlude it
 const cssRenderer = new CSS3DRenderer();
 cssRenderer.setSize(window.innerWidth, window.innerHeight);
-cssRenderer.domElement.style.cssText = 'position:absolute;top:0;left:0;z-index:0;pointer-events:none;';
+cssRenderer.domElement.style.cssText = 'position:absolute;top:0;left:0;z-index:3;pointer-events:none;';
 document.body.insertBefore(cssRenderer.domElement, renderer.domElement);
 
 // Stars
@@ -350,7 +342,6 @@ const _q = new THREE.Quaternion();
 const _mat = new THREE.Matrix4();
 const _targetCamPos = new THREE.Vector3();
 const _lookAt = new THREE.Vector3();
-const _projVec = new THREE.Vector3();
 
 // ─── Character model ──────────────────────────────────────────────────────────
 let doro = null;
@@ -399,21 +390,25 @@ initUI(settings, {
 });
 
 const tooltipSystem = createBuildingTooltipSystem(['school']);
+const bookPanel = createBookPanel();
 
 // Wrap each tooltip element in a CSS3DObject so Three.js projects it into 3D space.
-// WebGL objects rendered on the alpha canvas above z-index 0 will naturally occlude it.
 const cssScene = new THREE.Scene();
 const schoolCss3d = new CSS3DObject(tooltipSystem.getElement('school'));
 schoolCss3d.scale.set(0.01, 0.01, 0.01);
 schoolCss3d.position.copy(schoolTooltipPos);
 cssScene.add(schoolCss3d);
 
-const maskGeo = new THREE.PlaneGeometry(200, 100); 
-const schoolMask = new THREE.Mesh(maskGeo, occlusionMaterial);
+let _currentArcDist = Infinity;
 
-schoolMask.position.copy(schoolTooltipPos);
-schoolMask.scale.copy(schoolCss3d.scale); // Keep them perfectly aligned
-scene.add(schoolMask);
+window.addEventListener('keydown', (e) => {
+    if (e.code === 'Enter' && _currentArcDist < SCHOOL_NEAR_ARC_DIST && !bookPanel.isOpen) {
+        const v = schoolTooltipPos.clone().project(camera);
+        const sx = ( v.x * 0.5 + 0.5) * window.innerWidth;
+        const sy = (-v.y * 0.5 + 0.5) * window.innerHeight;
+        bookPanel.open(sx, sy);
+    }
+});
 
 function animate() {
     requestAnimationFrame(animate);
@@ -493,6 +488,7 @@ function animate() {
     // ── Building collision ────────────────────────────────────────────────────
     const cosAngle = _up.dot(schoolNormal);
     const arcDist  = Math.acos(Math.max(-1, Math.min(1, cosAngle))) * SPHERE_RADIUS;
+    _currentArcDist = arcDist;
     if (arcDist < SCHOOL_COLLISION_RADIUS && arcDist > 0.0001) {
         _rotAxis.crossVectors(schoolNormal, _up).normalize();
         _q.setFromAxisAngle(_rotAxis, SCHOOL_COLLISION_RADIUS / SPHERE_RADIUS);
@@ -531,20 +527,15 @@ function animate() {
     camera.lookAt(_lookAt);
 
     // ── Building tooltips (CSS3D) ─────────────────────────────────────────────
-    // Billboard: keep the tooltip facing the camera each frame
     schoolCss3d.quaternion.copy(camera.quaternion);
-    // Visibility: hide when school is behind the camera (CSS3DRenderer has no clip)
-    _projVec.copy(schoolTooltipPos).project(camera);
     tooltipSystem.update([{
         id: 'school',
-        visible: _projVec.z < 1.0,
+        visible: schoolNormal.dot(camera.position) > 0,
         isNear:  arcDist < SCHOOL_NEAR_ARC_DIST,
     }]);
 
-    schoolCss3d.quaternion.copy(camera.quaternion);
-    schoolMask.quaternion.copy(camera.quaternion);
-
     renderer.render(scene, camera);
     cssRenderer.render(cssScene, camera);
+    console.log(bookPanel.isOpen);
 }
 animate();
