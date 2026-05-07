@@ -580,6 +580,21 @@ function animate() {
     }
     physicsWorld.step(1 / 60, delta, 3);
 
+    // Ground clamp — prevent objects from sinking below the sphere surface
+    for (const po of physicsObjects) {
+        if (po.body.sleepState === 2) continue;
+        const p = po.body.position;
+        const dist = p.length();
+        if (dist < po.groundDist && dist > 0.001) {
+            const scale = po.groundDist / dist;
+            p.x *= scale; p.y *= scale; p.z *= scale;
+            const nx = p.x / po.groundDist, ny = p.y / po.groundDist, nz = p.z / po.groundDist;
+            const v = po.body.velocity;
+            const vn = v.x*nx + v.y*ny + v.z*nz;
+            if (vn < 0) { v.x -= vn*nx; v.y -= vn*ny; v.z -= vn*nz; }
+        }
+    }
+
     // Ground clamp + mesh sync (only for awake/sleepy bodies)
     // for (const po of physicsObjects) {
     //     if (po.body.sleepState === 2) continue; // sleeping — no update needed
