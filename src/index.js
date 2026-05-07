@@ -16,6 +16,7 @@ import boxOpenUrl      from '../3d_models/objects/random_objects/box/box-open.gl
 import boxLargeOpenUrl from '../3d_models/objects/random_objects/box/box-large-open.glb?url';
 
 import { initUI, createBuildingTooltipSystem, createBookPanel } from './ui.js';
+import { initPhysics, PHYS_IMPULSE_STR } from './physics.js';
 
 
 
@@ -38,12 +39,7 @@ const RANDOM_OBJ_EXCL_RADIUS      = 2.5;                   // exclusion arc-dist
 const RANDOM_OBJ_COLLISION_RADIUS = RANDOM_OBJ_SCALE * 0.45; // player push-out radius per item
 
 // ─── Physics ─────────────────────────────────────────────────────────────────
-const PHYS_GRAVITY      = 20;                       // acceleration toward sphere center (m/s²)
-const PHYS_HALF_EXT     = RANDOM_OBJ_SCALE * 0.35; // fallback half-extent (unused when bbox auto-compute succeeds)
-const PHYS_IMPULSE_STR  = 10;                       // impulse magnitude on first player contact
-const PHYS_RESTITUTION  = 0.25;                     // bounciness vs sphere ground
-const PHYS_GROUND_FRICTION  = 0.5;                  // converts sliding velocity to spin on ground impact
-const PHYS_ROLLING_FRICTION = 0.16;                 // angular velocity retained per second while on ground (lower = stops faster)
+const PHYS_HALF_EXT = RANDOM_OBJ_SCALE * 0.35; // fallback half-extent (unused when bbox auto-compute succeeds)
 
 const GRASS_COUNT     = 10000; // number of grass patches placed on the sphere
 const GRASS_SCALE_MIN = 1.0;   // minimum random scale
@@ -83,46 +79,17 @@ const settings = {
 
 const scene = new THREE.Scene();
 
-// ─── Cannon physics world ─────────────────────────────────────────────────────
-const physicsWorld = new CANNON.World();
-physicsWorld.gravity.set(0, 0, 0); // per-body gravity applied manually each frame
-physicsWorld.allowSleep     = true;
-physicsWorld.sleepSpeedLimit = 0.4; // sleep when all velocity < this
-physicsWorld.sleepTimeLimit  = 1.5; // must stay slow for this many seconds
-physicsWorld.solver.iterations = 40; 
-physicsWorld.solver.tolerance = 0.001;
-const planetShape = new CANNON.Sphere(SPHERE_RADIUS);
-const planetBody = new CANNON.Body({
-    mass: 0, // Mass 0 makes it an unmovable floor
-    shape: planetShape,
-    position: new CANNON.Vec3(0, 0, 0)
-});
-
-// 1. Create physics materials
-const planetMaterial = new CANNON.Material('planet');
-const objectMaterial = new CANNON.Material('object');
-
-// 2. Assign the planet material to the planet body
-planetBody.material = planetMaterial; 
-
-// 3. Define exactly how these two materials interact
-const planetObjectContact = new CANNON.ContactMaterial(
-    planetMaterial,
-    objectMaterial,
-    {
-        friction: 0.8,        // High friction to stop infinite sliding
-        restitution: 0.1,     // Low bounciness to stop micro-jittering
-        contactEquationStiffness: 1e8,  // Makes the floor solid instead of spongy (stops sinking)
-        contactEquationRelaxation: 3    // Stabilizes the stiff contacts
-    }
-);
-physicsWorld.addContactMaterial(planetObjectContact);
-
-physicsWorld.addBody(planetBody);
+const { physicsWorld, objectMaterial, stepPhysics } = initPhysics(SPHERE_RADIUS);
 
 // Background rendered as body CSS so the alpha WebGL canvas is transparent,
 // allowing CSS3DRenderer content behind it to show through correctly.
-document.body.style.backgroundColor = '#000814';
+{
+    const skyUrls = Object.values(
+        import.meta.glob('../assets/background/sky/*/background */orig.png', { eager: true, import: 'default' })
+    );
+    const chosen = skyUrls[Math.floor(Math.random() * skyUrls.length)];
+    document.body.style.cssText = `margin:0;background:#000814 url('${chosen}') center/cover no-repeat;`;
+}
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 1000);
 
@@ -139,19 +106,6 @@ const cssRenderer = new CSS3DRenderer();
 cssRenderer.setSize(window.innerWidth, window.innerHeight);
 cssRenderer.domElement.style.cssText = 'position:absolute;top:0;left:0;z-index:3;pointer-events:none;';
 document.body.insertBefore(cssRenderer.domElement, renderer.domElement);
-
-// Stars
-{
-    const verts = new Float32Array(6000);
-    for (let i = 0; i < 6000; i += 3) {
-        const v = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
-        const d = 300 + Math.random() * 200;
-        verts[i] = v.x * d; verts[i + 1] = v.y * d; verts[i + 2] = v.z * d;
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
-    scene.add(new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.8 })));
-}
 
 // Lights
 scene.add(new THREE.AmbientLight(0x8899bb, 0.8));
@@ -461,6 +415,10 @@ cssScene.add(schoolCss3d);
 
 let _currentArcDist = Infinity;
 
+tooltipSystem.getElement('school').querySelector('.bld-tt-shell').addEventListener('click', (e) => {
+    if (!bookPanel.isOpen) bookPanel.open(e.clientX, e.clientY);
+});
+
 window.addEventListener('keydown', (e) => {
     if (e.code === 'Enter' && _currentArcDist < SCHOOL_NEAR_ARC_DIST && !bookPanel.isOpen) {
         const v = schoolTooltipPos.clone().project(camera);
@@ -567,120 +525,7 @@ function animate() {
     }
 
     // ── Physics step ─────────────────────────────────────────────────────────
-    for (const po of physicsObjects) {
-        if (po.body.sleepState < 2) {
-            // Gravity toward sphere center
-            const p = po.body.position;
-            const len = p.length();
-            if (len > 0.001) {
-                const s = -po.body.mass * PHYS_GRAVITY / len;
-                po.body.force.set(p.x * s, p.y * s, p.z * s);
-            }
-        }
-    }
-    physicsWorld.step(1 / 60, delta, 3);
-
-    // Ground clamp — prevent objects from sinking below the sphere surface
-    for (const po of physicsObjects) {
-        if (po.body.sleepState === 2) continue;
-        const p = po.body.position;
-        const dist = p.length();
-        if (dist < po.groundDist && dist > 0.001) {
-            const scale = po.groundDist / dist;
-            p.x *= scale; p.y *= scale; p.z *= scale;
-            const nx = p.x / po.groundDist, ny = p.y / po.groundDist, nz = p.z / po.groundDist;
-            const v = po.body.velocity;
-            const vn = v.x*nx + v.y*ny + v.z*nz;
-            if (vn < 0) { v.x -= vn*nx; v.y -= vn*ny; v.z -= vn*nz; }
-        }
-    }
-
-    // Ground clamp + mesh sync (only for awake/sleepy bodies)
-    // for (const po of physicsObjects) {
-    //     if (po.body.sleepState === 2) continue; // sleeping — no update needed
-    //     const p = po.body.position;
-    //     const dist = p.length();
-    //     if (dist < po.groundDist && dist > 0.001) {
-    //         // Clamp center to resting height above sphere surface
-    //         const scale = po.groundDist / dist;
-    //         p.set(p.x * scale, p.y * scale, p.z * scale);
-    //         const nx = p.x / po.groundDist, ny = p.y / po.groundDist, nz = p.z / po.groundDist;
-    //         const he_y = po.groundDist - SPHERE_RADIUS;
-    //         const v = po.body.velocity;
-    //         const vrad = v.x * nx + v.y * ny + v.z * nz;
-    //         if (vrad < 0) {
-    //             // Tangential (sliding) velocity — unchanged by normal reflection
-    //             const vtx = v.x - vrad * nx;
-    //             const vty = v.y - vrad * ny;
-    //             const vtz = v.z - vrad * nz;
-    //             // Skip restitution for micro-impacts (gravity tick artifacts) to stop jitter/floating
-    //             const restitution = Math.abs(vrad) > 0.5 ? PHYS_RESTITUTION : 0;
-    //             v.x -= vrad * (1 + restitution) * nx;
-    //             v.y -= vrad * (1 + restitution) * ny;
-    //             v.z -= vrad * (1 + restitution) * nz;
-    //             // Friction impulse at contact point (bottom of box) converts sliding → spin
-    //             const vtmag = Math.sqrt(vtx*vtx + vty*vty + vtz*vtz);
-    //             const Jn = Math.abs(vrad) * (1 + restitution) * po.body.mass;
-    //             if (vtmag > 0.01 && Jn > 0.01) {
-    //                 const fmag = Math.min(PHYS_GROUND_FRICTION * Jn, po.body.mass * vtmag);
-    //                 po.body.applyImpulse(
-    //                     new CANNON.Vec3(-fmag * vtx / vtmag, -fmag * vty / vtmag, -fmag * vtz / vtmag),
-    //                     new CANNON.Vec3(-nx * he_y, -ny * he_y, -nz * he_y)
-    //                 );
-    //             }
-    //         }
-    //     }
-    //     // Rolling resistance: runs whenever body is at or near the sphere surface,
-    //     // not just when it has sunk below — fixes infinite spinning after a bounce.
-    //     if (dist <= po.groundDist + 0.3 && dist > 0.001) {
-    //         const rollingDamp = Math.pow(PHYS_ROLLING_FRICTION, delta);
-    //         const av = po.body.angularVelocity;
-    //         av.x *= rollingDamp; av.y *= rollingDamp; av.z *= rollingDamp;
-    //     }
-    //     // Sync Three.js mesh — offset mesh origin from body center in body-local Y direction
-    //     // so that models with non-centred origins (e.g. origin at base) sit correctly on the
-    //     // surface even after tumbling.
-    //     const bq = po.body.quaternion;
-    //     po.mesh.quaternion.set(bq.x, bq.y, bq.z, bq.w);
-    //     if (Math.abs(po.meshOriginOffset) > 0.0001) {
-    //         // Rotate body local Y (0,1,0) into world space via quaternion
-    //         const byX = 2*(bq.x*bq.y - bq.w*bq.z);
-    //         const byY = 1 - 2*(bq.x*bq.x + bq.z*bq.z);
-    //         const byZ = 2*(bq.y*bq.z + bq.w*bq.x);
-    //         const off = po.meshOriginOffset;
-    //         po.mesh.position.set(p.x - byX*off, p.y - byY*off, p.z - byZ*off);
-    //     } else {
-    //         po.mesh.position.set(p.x, p.y, p.z);
-    //     }
-    //     // Keep surfaceNormal current so collision detection follows the object
-    //     if (dist > 0.001) po.surfaceNormal.set(p.x / dist, p.y / dist, p.z / dist);
-    // }
-    // Sync Three.js mesh with Cannon.js body
-    for (const po of physicsObjects) {
-        if (po.body.sleepState === 2) continue; // sleeping — no update needed
-        
-        const p = po.body.position;
-        const bq = po.body.quaternion;
-        
-        // Sync rotation
-        po.mesh.quaternion.set(bq.x, bq.y, bq.z, bq.w);
-        
-        // Sync position (accounting for models where the origin is not centered)
-        if (Math.abs(po.meshOriginOffset) > 0.0001) {
-            // Rotate body local Y (0,1,0) into world space via quaternion
-            const byX = 2*(bq.x*bq.y - bq.w*bq.z);
-            const byY = 1 - 2*(bq.x*bq.x + bq.z*bq.z);
-            const byZ = 2*(bq.y*bq.z + bq.w*bq.x);
-            const off = po.meshOriginOffset;
-            po.mesh.position.set(p.x - byX*off, p.y - byY*off, p.z - byZ*off);
-        } else {
-            po.mesh.position.set(p.x, p.y, p.z);
-        }
-
-        // Keep surfaceNormal current so collision detection follows the object
-        const dist = p.length();
-        if (dist > 0.001) po.surfaceNormal.set(p.x / dist, p.y / dist, p.z / dist);
-    }
+    stepPhysics(delta, physicsObjects);
 
     // ── Random object collision + physics impulse ─────────────────────────────
     for (const po of physicsObjects) {

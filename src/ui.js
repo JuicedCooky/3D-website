@@ -285,8 +285,11 @@ export function createBuildingTooltipSystem(buildingIds) {
             height: 44px;
             background: url('${tooltipBgUrl}') center / 100% 100% no-repeat;
             transition: width 0.25s ease, height 0.25s ease;
+            pointer-events: auto;
+            cursor: pointer;
         }
-        .bld-tooltip.tt-near .bld-tt-shell {
+        .bld-tooltip.tt-near .bld-tt-shell,
+        .bld-tooltip.tt-hovered .bld-tt-shell {
             width: 112px;
             height: 80px;
         }
@@ -300,7 +303,8 @@ export function createBuildingTooltipSystem(buildingIds) {
             opacity: 0;
             transition: opacity 0.2s;
         }
-        .bld-tooltip.tt-near .bld-tt-enter { opacity: 1; }
+        .bld-tooltip.tt-near .bld-tt-enter,
+        .bld-tooltip.tt-hovered .bld-tt-enter { opacity: 1; }
         .bld-tt-enter img {
             width: 40px;
             height: 40px;
@@ -316,7 +320,8 @@ export function createBuildingTooltipSystem(buildingIds) {
             transition: opacity 0.2s;
             pointer-events: none;
         }
-        .bld-tooltip.tt-near .bld-tt-border { opacity: 1; }
+        .bld-tooltip.tt-near .bld-tt-border,
+        .bld-tooltip.tt-hovered .bld-tt-border { opacity: 1; }
     `;
     document.head.appendChild(style);
 
@@ -342,6 +347,9 @@ export function createBuildingTooltipSystem(buildingIds) {
         shell.appendChild(borderDiv);
         el.appendChild(shell);
         // CSS3DRenderer manages DOM placement — do NOT append to body here
+
+        shell.addEventListener('mouseenter', () => el.classList.add('tt-hovered'));
+        shell.addEventListener('mouseleave', () => el.classList.remove('tt-hovered'));
 
         return { id, el, borderDiv };
     });
