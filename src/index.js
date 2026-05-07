@@ -52,6 +52,8 @@ const settings = {
     grassScaleMin: GRASS_SCALE_MIN,
     grassScaleMax: GRASS_SCALE_MAX,
     panSpeed:      4,
+    walkSpeed:      1,
+    moveSpeed:      1,
 };
 
 const scene = new THREE.Scene();
@@ -358,7 +360,7 @@ loader.load(walkUrl, (gltf) => {
     const mixer = new THREE.AnimationMixer(model);
     const action = mixer.clipAction(gltf.animations[0]);
     action.play();
-    action.timeScale = WALK_ANIM_SPEED;
+    action.timeScale = WALK_ANIM_SPEED * settings.walkSpeed;
     action.paused = true; // start frozen at frame 0 (idle pose)
     scene.add(model);
     doro = { model, mixer, action };
@@ -469,7 +471,7 @@ function animate() {
 
         // Move on sphere surface: rotate playerPos around cross(up, moveDir)
         _rotAxis.crossVectors(_up, _moveDir).normalize();
-        _q.setFromAxisAngle(_rotAxis, MOVE_SPEED * delta / SPHERE_RADIUS);
+        _q.setFromAxisAngle(_rotAxis, settings.moveSpeed * MOVE_SPEED * delta / SPHERE_RADIUS);
         playerPos.applyQuaternion(_q).setLength(SPHERE_RADIUS);
         facingDir.applyQuaternion(_q).normalize();
 

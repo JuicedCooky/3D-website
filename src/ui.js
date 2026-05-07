@@ -180,6 +180,16 @@ export function initUI(settings, { onGrassApply, onShadowChange }) {
             <label>Pan Speed</label>
             <input type="number" id="cfg-pan-speed" min="1" max="20" step="1" value="${settings.panSpeed}">
         </div>
+        <div class="cfg-row">
+            <label>Move Speed</label>
+            <input type="number" id="cfg-move-speed" min="1" max="20" step="1" value="${settings.moveSpeed}">
+        </div>
+
+        <div class="cfg-section">Animations</div>
+        <div class="cfg-row">
+            <label>Walk Speed</label>
+            <input type="number" id="cfg-walk-speed" min="1" max="20" step="1" value="${settings.walkSpeed}">
+        </div>
 
         <div class="cfg-section">Grass</div>
         <div class="cfg-row">
@@ -204,6 +214,13 @@ export function initUI(settings, { onGrassApply, onShadowChange }) {
 
     panel.querySelector('#cfg-pan-speed').addEventListener('change', (e) => {
         settings.panSpeed = Math.max(1, Number(e.target.value));
+    });
+
+    panel.querySelector('#cfg-walk-speed').addEventListener('change', (e) => {
+        settings.walkSpeed = Math.max(1, Number(e.target.value));
+    });
+    panel.querySelector('#cfg-move-speed').addEventListener('change', (e) => {
+        settings.moveSpeed = Math.max(1, Number(e.target.value));
     });
 
     panel.querySelector('#cfg-shadow').addEventListener('change', (e) => {
