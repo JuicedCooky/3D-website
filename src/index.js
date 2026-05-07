@@ -67,28 +67,109 @@ const cosSchoolGrassExclusion = Math.cos(SCHOOL_GRASS_RADIUS / SPHERE_RADIUS);
 const schoolTooltipPos = schoolNormal.clone().multiplyScalar(SPHERE_RADIUS + UI_HEIGHT);
 
 const settings = {
-    shadowMapSize: 2048,
-    grassCount:    GRASS_COUNT,
-    grassScaleMin: GRASS_SCALE_MIN,
-    grassScaleMax: GRASS_SCALE_MAX,
-    panSpeed:      4,
-    walkSpeed:      1,
-    moveSpeed:      1,
-    objClusters:   RANDOM_OBJ_CLUSTERS,
+    shadowMapSize:    2048,
+    grassCount:       GRASS_COUNT,
+    grassScaleMin:    GRASS_SCALE_MIN,
+    grassScaleMax:    GRASS_SCALE_MAX,
+    panSpeed:         4,
+    walkSpeed:        1,
+    moveSpeed:        1,
+    objClusters:      RANDOM_OBJ_CLUSTERS,
+    parallaxStrength: 2,
+    bgLayerSize:      100,
+    fgLayerSize:      100,
 };
 
 const scene = new THREE.Scene();
 
 const { physicsWorld, objectMaterial, stepPhysics } = initPhysics(SPHERE_RADIUS);
 
-// Background rendered as body CSS so the alpha WebGL canvas is transparent,
-// allowing CSS3DRenderer content behind it to show through correctly.
+let ambientLight, sun; // declared before parallax so the async callback can update them
+
+function sampleImageColor(url) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = canvas.height = 8;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, 8, 8);
+            const data = ctx.getImageData(0, 0, 8, 8).data;
+            let r = 0, g = 0, b = 0;
+            for (let i = 0; i < data.length; i += 4) { r += data[i]; g += data[i+1]; b += data[i+2]; }
+            const n = data.length / 4;
+            resolve(new THREE.Color(r / n / 255, g / n / 255, b / n / 255));
+        };
+        img.onerror = () => resolve(null);
+        img.src = url;
+    });
+}
+
+// Background parallax — layers behind the transparent WebGL canvas.
+// Each folder contains numbered PNGs (1 = farthest sky, N = closest foreground).
+let parallax = null;
 {
-    const skyUrls = Object.values(
-        import.meta.glob('../assets/background/sky/*/background */orig.png', { eager: true, import: 'default' })
+    const allImages = import.meta.glob(
+        '../assets/background/sky/*/background */*.png',
+        { eager: true, import: 'default' }
     );
-    const chosen = skyUrls[Math.floor(Math.random() * skyUrls.length)];
-    document.body.style.cssText = `margin:0;background:#000814 url('${chosen}') center/cover no-repeat;`;
+
+    const folders = {};
+    for (const [path, url] of Object.entries(allImages)) {
+        const filename = path.split('/').pop();
+        if (filename.startsWith('orig')) continue;
+        const folder = path.substring(0, path.lastIndexOf('/'));
+        (folders[folder] ??= []).push({ n: parseInt(filename), url });
+    }
+
+    const keys = Object.keys(folders);
+    const chosen = keys[Math.floor(Math.random() * keys.length)];
+    const layers = folders[chosen].sort((a, b) => a.n - b.n).map(l => l.url);
+
+    const fgUrls = layers.slice(1);
+    Promise.all([sampleImageColor(layers[0]), ...fgUrls.map(sampleImageColor)])
+        .then(([bgColor, ...fgColors]) => {
+            if (bgColor && ambientLight) ambientLight.color.copy(bgColor);
+            const brightest = fgColors
+                .filter(Boolean)
+                .reduce((best, c) => {
+                    const hsl = {}; c.getHSL(hsl);
+                    const bHsl = {}; best.getHSL(bHsl);
+                    return hsl.l > bHsl.l ? c : best;
+                }, fgColors.find(Boolean));
+            if (brightest && sun) sun.color.copy(brightest);
+        });
+
+    document.body.style.cssText = 'margin:0;background:#000814;';
+
+    const container = document.createElement('div');
+    container.style.cssText = 'position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none;';
+    const divs = layers.map((url, i) => {
+        const d = document.createElement('div');
+        const sz = i === 0 ? `${settings.bgLayerSize}%` : `${settings.fgLayerSize}%`;
+        d.style.cssText = `position:absolute;width:130%;height:130%;top:-15%;left:-15%;background:url('${url}') center/${sz} no-repeat;will-change:transform;`;
+        container.appendChild(d);
+        return d;
+    });
+    document.body.appendChild(container);
+
+    const _p = new THREE.Vector3();
+    parallax = {
+        update(camera, strength) {
+            _p.copy(camera.position).normalize();
+            divs.forEach((d, i) => {
+                const f  = divs.length > 1 ? i / (divs.length - 1) : 0;
+                const ox = _p.z * f * strength * 80;
+                const oy = _p.y * f * strength * 60;
+                d.style.transform = `translate(${ox}px,${oy}px)`;
+            });
+        },
+        setLayerSizes(bgSize, fgSize) {
+            divs.forEach((d, i) => {
+                d.style.backgroundSize = i === 0 ? `${bgSize}%` : `${fgSize}%`;
+            });
+        },
+    };
 }
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 1000);
@@ -108,8 +189,9 @@ cssRenderer.domElement.style.cssText = 'position:absolute;top:0;left:0;z-index:3
 document.body.insertBefore(cssRenderer.domElement, renderer.domElement);
 
 // Lights
-scene.add(new THREE.AmbientLight(0x8899bb, 0.8));
-const sun = new THREE.DirectionalLight(0xfff8e0, 2.5);
+ambientLight = new THREE.AmbientLight(0x8899bb, 0.8);
+scene.add(ambientLight);
+sun = new THREE.DirectionalLight(0xfff8e0, 2.5);
 sun.position.set(40, 30, 20);
 sun.castShadow = true;
 sun.shadow.mapSize.setScalar(2048);
@@ -401,6 +483,8 @@ initUI(settings, {
             if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
         }
     },
+    onBgSizeChange: (v) => parallax.setLayerSizes(v, settings.fgLayerSize),
+    onFgSizeChange: (v) => parallax.setLayerSizes(settings.bgLayerSize, v),
 });
 
 const tooltipSystem = createBuildingTooltipSystem(['school']);
@@ -598,8 +682,8 @@ function animate() {
         isNear:  arcDist < SCHOOL_NEAR_ARC_DIST,
     }]);
 
+    parallax.update(camera, settings.parallaxStrength);
     renderer.render(scene, camera);
     cssRenderer.render(cssScene, camera);
-    console.log(bookPanel.isOpen);
 }
 animate();

@@ -12,7 +12,7 @@ import border2Url   from '../assets/ui/tooltip_border/UI_TravelBook_SlotCursor01
 import border3Url   from '../assets/ui/tooltip_border/UI_TravelBook_SlotCursor01a_3.png?url';
 import border4Url   from '../assets/ui/tooltip_border/UI_TravelBook_SlotCursor01a_4.png?url';
 
-export function initUI(settings, { onGrassApply, onObjApply, onShadowChange }) {
+export function initUI(settings, { onGrassApply, onObjApply, onShadowChange, onBgSizeChange, onFgSizeChange }) {
     const style = document.createElement('style');
     style.textContent = `
         #settings-panel {
@@ -175,6 +175,20 @@ export function initUI(settings, { onGrassApply, onObjApply, onShadowChange }) {
             </select>
         </div>
 
+        <div class="cfg-section">Background</div>
+        <div class="cfg-row">
+            <label>Parallax</label>
+            <input type="number" id="cfg-parallax" min="0" max="5" step="0.5" value="${settings.parallaxStrength}">
+        </div>
+        <div class="cfg-row">
+            <label>BG Size %</label>
+            <input type="number" id="cfg-bg-size" min="50" max="400" step="10" value="${settings.bgLayerSize}">
+        </div>
+        <div class="cfg-row">
+            <label>FG Size %</label>
+            <input type="number" id="cfg-fg-size" min="50" max="400" step="10" value="${settings.fgLayerSize}">
+        </div>
+
         <div class="cfg-section">Controls</div>
         <div class="cfg-row">
             <label>Pan Speed</label>
@@ -219,6 +233,20 @@ export function initUI(settings, { onGrassApply, onObjApply, onShadowChange }) {
     document.body.appendChild(panel);
 
     panel.querySelector('#cfg-shadow').value = String(settings.shadowMapSize);
+
+    panel.querySelector('#cfg-parallax').addEventListener('change', (e) => {
+        settings.parallaxStrength = Math.max(0, Number(e.target.value));
+    });
+
+    panel.querySelector('#cfg-bg-size').addEventListener('change', (e) => {
+        settings.bgLayerSize = Math.max(50, Number(e.target.value));
+        onBgSizeChange(settings.bgLayerSize);
+    });
+
+    panel.querySelector('#cfg-fg-size').addEventListener('change', (e) => {
+        settings.fgLayerSize = Math.max(50, Number(e.target.value));
+        onFgSizeChange(settings.fgLayerSize);
+    });
 
     panel.querySelector('#cfg-pan-speed').addEventListener('change', (e) => {
         settings.panSpeed = Math.max(1, Number(e.target.value));
