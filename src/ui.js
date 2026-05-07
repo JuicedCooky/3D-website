@@ -12,7 +12,7 @@ import border2Url   from '../assets/ui/tooltip_border/UI_TravelBook_SlotCursor01
 import border3Url   from '../assets/ui/tooltip_border/UI_TravelBook_SlotCursor01a_3.png?url';
 import border4Url   from '../assets/ui/tooltip_border/UI_TravelBook_SlotCursor01a_4.png?url';
 
-export function initUI(settings, { onGrassApply, onShadowChange }) {
+export function initUI(settings, { onGrassApply, onObjApply, onShadowChange }) {
     const style = document.createElement('style');
     style.textContent = `
         #settings-panel {
@@ -206,6 +206,14 @@ export function initUI(settings, { onGrassApply, onShadowChange }) {
         </div>
 
         <button class="cfg-btn" id="cfg-apply-grass">Apply Grass</button>
+
+        <div class="cfg-section">Objects</div>
+        <div class="cfg-row">
+            <label>Clusters</label>
+            <input type="number" id="cfg-obj-clusters" min="0" max="200" step="5" value="${settings.objClusters}">
+        </div>
+        <button class="cfg-btn" id="cfg-apply-obj">Apply Objects</button>
+
         <button class="cfg-btn" id="cfg-close">Close  [Tab]</button>
     `;
     document.body.appendChild(panel);
@@ -226,6 +234,11 @@ export function initUI(settings, { onGrassApply, onShadowChange }) {
     panel.querySelector('#cfg-shadow').addEventListener('change', (e) => {
         settings.shadowMapSize = Number(e.target.value);
         onShadowChange(settings.shadowMapSize);
+    });
+
+    panel.querySelector('#cfg-apply-obj').addEventListener('click', () => {
+        settings.objClusters = Number(panel.querySelector('#cfg-obj-clusters').value);
+        onObjApply();
     });
 
     panel.querySelector('#cfg-apply-grass').addEventListener('click', () => {

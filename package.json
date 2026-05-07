@@ -23,6 +23,7 @@
     "deploy": "gh-pages -d dist"
   },
   "dependencies": {
+    "cannon-es": "^0.20.0",
     "nipplejs": "^1.0.1",
     "three": "^0.184.0"
   },

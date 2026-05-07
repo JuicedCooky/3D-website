@@ -1,23 +1,47 @@
 import * as THREE from 'three';
+import * as CANNON from 'cannon-es';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { CSS3DRenderer, CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRenderer.js';
-import nipplejs from 'nipplejs';
+import { keys, joystick, initCameraControls } from './controls.js';
 import walkUrl from '../3d_models/doro/doro_walk_2.glb?url';
 import worldUrl from '../3d_models/world.glb?url';
 import grassUrl from '../3d_models/objects/grass.glb?url';
 import schoolUrl from '../3d_models/objects/school.glb?url';
 
+import barrelUrl       from '../3d_models/objects/random_objects/barrel/barrel.glb?url';
+import barrelOpenUrl   from '../3d_models/objects/random_objects/barrel/barrel-open.glb?url';
+import boxUrl          from '../3d_models/objects/random_objects/box/box.glb?url';
+import boxLargeUrl     from '../3d_models/objects/random_objects/box/box-large.glb?url';
+import boxOpenUrl      from '../3d_models/objects/random_objects/box/box-open.glb?url';
+import boxLargeOpenUrl from '../3d_models/objects/random_objects/box/box-large-open.glb?url';
+
 import { initUI, createBuildingTooltipSystem, createBookPanel } from './ui.js';
 
 
 
-const SPHERE_RADIUS = 8;
+const SPHERE_RADIUS = 16    ;
 const MOVE_SPEED = 3;
 const TURN_SPEED = 6;
 const HOME_PITCH = 0.4;
 const SNAP_SPEED = 6; // how fast camera snaps back
 const WALK_ANIM_SPEED = 4.0; // walk animation playback rate (1 = normal, 2 = double, 0.5 = half)
+const SPRINT_MULTIPLIER = 2.0; // movement + animation speed multiplier when holding Left Shift
 const CAM_DIST = 10;          // initial camera distance from player
+
+const ACCEL_TIME  = 3.0; // seconds of continuous movement to reach full speed
+const ACCEL_BONUS = 1.5; // fractional speed increase at full accel (1.0 + this = max multiplier)
+
+const RANDOM_OBJ_CLUSTERS    = 50;
+const RANDOM_OBJ_SCALE       = 2.0;
+const RANDOM_OBJ_SPREAD      = 1.0; // max arc-distance spread within a cluster (world units)
+const RANDOM_OBJ_EXCL_RADIUS      = 2.5;                   // exclusion arc-distance around school
+const RANDOM_OBJ_COLLISION_RADIUS = RANDOM_OBJ_SCALE * 0.45; // player push-out radius per item
+
+// ─── Physics ─────────────────────────────────────────────────────────────────
+const PHYS_GRAVITY      = 20;                       // acceleration toward sphere center (m/s²)
+const PHYS_HALF_EXT     = RANDOM_OBJ_SCALE * 0.35; // fallback half-extent (unused when bbox auto-compute succeeds)
+const PHYS_IMPULSE_STR  = 10;                       // impulse magnitude on first player contact
+const PHYS_RESTITUTION  = 0.25;                     // bounciness vs sphere ground
 
 const GRASS_COUNT     = 10000; // number of grass patches placed on the sphere
 const GRASS_SCALE_MIN = 1.0;   // minimum random scale
@@ -27,12 +51,10 @@ const GRASS_SCALE_MAX = 2.0;   // maximum random scale
 const SCHOOL_THETA            = 0.3;  // azimuth around Y axis (radians)
 const SCHOOL_PHI              = 0.5;  // polar angle from north pole (radians)
 const SCHOOL_YAW              = 0.0;  // spin around sphere normal (radians)
-const SCHOOL_SCALE            = 1.0;  // uniform scale
-const SCHOOL_COLLISION_RADIUS = 1.0;  // character push-out radius (world units)
-const SCHOOL_GRASS_RADIUS     = 1.0;  // no-grass exclusion radius (world units)
-
-// UI building placement
-const SCHOOL_NEAR_ARC_DIST    = 3.5;  // arc distance at which the tooltip expands (world units)
+const SCHOOL_SCALE            = 2.0;  // uniform scale
+const SCHOOL_COLLISION_RADIUS = 0.5  * SCHOOL_SCALE;  // scales with building size
+const SCHOOL_GRASS_RADIUS     = 0.5  * SCHOOL_SCALE;
+const SCHOOL_NEAR_ARC_DIST    = 1.75 * SCHOOL_SCALE;  // scales with building size
 const UI_HEIGHT = 2.0;
 
 
@@ -54,9 +76,18 @@ const settings = {
     panSpeed:      4,
     walkSpeed:      1,
     moveSpeed:      1,
+    objClusters:   RANDOM_OBJ_CLUSTERS,
 };
 
 const scene = new THREE.Scene();
+
+// ─── Cannon physics world ─────────────────────────────────────────────────────
+const physicsWorld = new CANNON.World();
+physicsWorld.gravity.set(0, 0, 0); // per-body gravity applied manually each frame
+physicsWorld.allowSleep     = true;
+physicsWorld.sleepSpeedLimit = 0.4; // sleep when all velocity < this
+physicsWorld.sleepTimeLimit  = 1.5; // must stay slow for this many seconds
+
 // Background rendered as body CSS so the alpha WebGL canvas is transparent,
 // allowing CSS3DRenderer content behind it to show through correctly.
 document.body.style.backgroundColor = '#000814';
@@ -178,156 +209,150 @@ loader.load(schoolUrl, (gltf) => {
     scene.add(school);
 }, undefined, (e) => console.error('school:', e));
 
-// ─── Input ────────────────────────────────────────────────────────────────────
-const keys = new Set();
-window.addEventListener('keydown', (e) => keys.add(e.code));
-window.addEventListener('keyup', (e) => keys.delete(e.code));
+// ─── Random scatter objects ────────────────────────────────────────────────────
+let randomObjRoot  = null;
+let physicsObjects = []; // { body: CANNON.Body, mesh: THREE.Object3D, surfaceNormal: THREE.Vector3 }
+let barrelTemplates = null;
+let boxTemplates    = null;
 
-// ─── Virtual joystick (touch devices only) ────────────────────────────────────
-const joystick = { x: 0, y: 0 }; // normalised [-1,1] x/y from nipple
+const cosObjExcl      = Math.cos(RANDOM_OBJ_EXCL_RADIUS      / SPHERE_RADIUS);
+const cosObjCollision = Math.cos(RANDOM_OBJ_COLLISION_RADIUS / SPHERE_RADIUS);
 
-if (window.matchMedia('(pointer: coarse)').matches) {
-    const zone = document.createElement('div');
-    zone.id = 'joystick-zone';
-    Object.assign(zone.style, {
-        position: 'fixed',
-        left: '0', bottom: '0',
-        width: '100%', height: '50%',
-        zIndex: '98',
-        touchAction: 'none',
-    });
-    document.body.appendChild(zone);
+function spawnRandomObjects() {
+    if (!barrelTemplates || !boxTemplates) return;
+    if (randomObjRoot) { scene.remove(randomObjRoot); randomObjRoot = null; }
+    for (const po of physicsObjects) physicsWorld.removeBody(po.body);
+    physicsObjects = [];
+    const count = settings.objClusters;
+    if (count <= 0) return;
 
-    const manager = nipplejs.create({
-        zone,
-        mode: 'dynamic',
-        dynamicPage: true,
-        color: 'rgba(255,255,255,0.5)',
-    });
+    randomObjRoot = new THREE.Group();
+    const groups = [barrelTemplates, boxTemplates];
+    const _n = new THREE.Vector3();
+    const _tangent = new THREE.Vector3();
 
-    manager.on('move', (event) => {
-        if (!event.data?.vector) return;
-        joystick.x =  event.data.vector.x;
-        joystick.y =  event.data.vector.y;
-    });
-    manager.on('end', () => { joystick.x = 0; joystick.y = 0; });
-}
+    // Minimum arc-distance separation derived from object scale
+    const itemFootprint  = RANDOM_OBJ_SCALE * 0.4;          // approx world-radius of one item
+    const minItemSep     = 2 * itemFootprint;                // item-to-item min distance
+    const minClusterSep  = RANDOM_OBJ_SPREAD + minItemSep;   // cluster-to-cluster min distance
+    const cosMinCluster  = Math.cos(minClusterSep / SPHERE_RADIUS);
+    const cosMinItem     = Math.cos(minItemSep     / SPHERE_RADIUS);
 
-// ─── Camera state ─────────────────────────────────────────────────────────────
-// camBaseDir: world-space unit vector pointing FROM player TOWARD camera (horizontal, tangent to sphere).
-// It is parallel-transported with player movement so it doesn't spin when the player turns.
-// It is NOT tied to facingDir.
-const camBaseDir = new THREE.Vector3(0, 0, 1); // initialised on first frame
-const savedCamBaseDir = new THREE.Vector3(0, 0, 1); // snap-back target
-let camPitch = HOME_PITCH;        // elevation angle (radians)
-let savedCamPitch = HOME_PITCH;   // snap-back pitch
-let camDist = CAM_DIST;           // zoom distance
-let isOrbiting = false;
-let snapBack = false;
+    const clusterCenters = [];
 
-// Cached sphere-normal for use inside event handlers (updated each frame)
-const _currentUp = new THREE.Vector3(0, 1, 0);
+    for (let c = 0; c < count; c++) {
+        // Pick a cluster center that doesn't overlap the school or existing clusters
+        let theta, phi, attempts = 0, valid = false;
+        do {
+            theta = Math.random() * Math.PI * 2;
+            phi   = Math.acos(2 * Math.random() - 1);
+            _n.set(
+                Math.sin(phi) * Math.cos(theta),
+                Math.cos(phi),
+                Math.sin(phi) * Math.sin(theta)
+            );
+            attempts++;
+            if (_n.dot(schoolNormal) > cosObjExcl) continue;
+            if (clusterCenters.some(cc => cc.dot(_n) > cosMinCluster)) continue;
+            valid = true;
+        } while (!valid && attempts < 100);
+        if (!valid) continue;
 
-renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+        clusterCenters.push(_n.clone());
+        const grp        = groups[Math.floor(Math.random() * groups.length)];
+        const itemCnt    = 1 + Math.floor(Math.random() * 4);
+        const itemNormals = [];
 
-renderer.domElement.addEventListener('mousedown', (e) => {
-    if (e.button === 2) {
-        isOrbiting = true;
-        snapBack = false;
-        savedCamBaseDir.copy(camBaseDir);
-        savedCamPitch = camPitch;
-    }
-});
+        for (let i = 0; i < itemCnt; i++) {
+            // Pick a spot in the cluster spread that doesn't overlap sibling items
+            let itemNormal = null;
+            for (let att = 0; att < 20; att++) {
+                _tangent.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5)
+                        .addScaledVector(_n, -_tangent.dot(_n)).normalize();
+                const arc = Math.random() * RANDOM_OBJ_SPREAD / SPHERE_RADIUS;
+                const candidate = _n.clone()
+                    .applyQuaternion(new THREE.Quaternion().setFromAxisAngle(_tangent, arc))
+                    .normalize();
+                if (!itemNormals.some(p => p.dot(candidate) > cosMinItem)) {
+                    itemNormal = candidate;
+                    itemNormals.push(candidate);
+                    break;
+                }
+            }
+            if (!itemNormal) continue;
 
-window.addEventListener('mouseup', (e) => {
-    if (e.button === 2) {
-        isOrbiting = false;
-        snapBack = true;
-    }
-});
+            const template = grp[Math.floor(Math.random() * grp.length)];
+            const obj = template.clone();
+            const alignQ = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), itemNormal);
+            const yawQ   = new THREE.Quaternion().setFromAxisAngle(itemNormal, Math.random() * Math.PI * 2);
+            obj.quaternion.copy(yawQ).multiply(alignQ);
 
-window.addEventListener('mousemove', (e) => {
-    if (!isOrbiting) return;
-    // Rotate camBaseDir around sphere normal by horizontal mouse delta
-    const yawQ = new THREE.Quaternion().setFromAxisAngle(_currentUp, -e.movementX * settings.panSpeed * 0.001);
-    camBaseDir.applyQuaternion(yawQ);
-    // Re-project onto tangent plane (floating-point drift correction)
-    camBaseDir.addScaledVector(_currentUp, -camBaseDir.dot(_currentUp)).normalize();
-    // Vertical mouse delta changes elevation
-    camPitch = Math.max(0.05, Math.min(1.3, camPitch + e.movementY * settings.panSpeed * 0.001));
-});
+            // Derive per-model half-extents from pre-computed bbox, scaled to world size
+            const rawHe = template.userData.halfExtents ?? new THREE.Vector3(PHYS_HALF_EXT, PHYS_HALF_EXT, PHYS_HALF_EXT);
+            const he = rawHe.clone().multiplyScalar(RANDOM_OBJ_SCALE);
+            const groundDist = SPHERE_RADIUS + he.y; // body center sits he.y above sphere surface
 
-renderer.domElement.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    camDist = Math.max(2, Math.min(20, camDist + e.deltaY * 0.01));
-}, { passive: false });
+            // If the model origin is not at its geometric center (e.g. origin at base),
+            // the mesh must be offset from the body center so the bottom face stays on the surface.
+            // meshOriginOffset = how far the mesh origin is below the bbox center, in world units.
+            const bboxCenterY = template.userData.bboxCenterY ?? 0;
+            const meshOriginOffset = bboxCenterY * RANDOM_OBJ_SCALE;
+            const meshDist = groundDist - meshOriginOffset; // mesh origin radius when upright
 
-// ─── Touch: top-half camera orbit + two-finger pinch zoom ────────────────────
-let touchOrbit = null;  // { id, lastX, lastY }
-let pinchDist  = null;  // px separation between pinch fingers
+            obj.position.copy(itemNormal).multiplyScalar(meshDist);
+            obj.scale.setScalar(RANDOM_OBJ_SCALE);
+            randomObjRoot.add(obj);
 
-function pinchSep(touches) {
-    const dx = touches[0].clientX - touches[1].clientX;
-    const dy = touches[0].clientY - touches[1].clientY;
-    return Math.sqrt(dx * dx + dy * dy);
-}
-
-renderer.domElement.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    if (e.touches.length >= 2) {
-        // Switch to pinch — cancel any active orbit
-        if (touchOrbit) { touchOrbit = null; isOrbiting = false; snapBack = true; }
-        pinchDist = pinchSep(e.touches);
-        return;
-    }
-    const t = e.changedTouches[0];
-    if (!touchOrbit && t.clientY < window.innerHeight * 0.5) {
-        touchOrbit = { id: t.identifier, lastX: t.clientX, lastY: t.clientY };
-        isOrbiting = true;
-        snapBack = false;
-        savedCamBaseDir.copy(camBaseDir);
-        savedCamPitch = camPitch;
-    }
-}, { passive: false });
-
-renderer.domElement.addEventListener('touchmove', (e) => {
-    e.preventDefault();
-    if (e.touches.length >= 2 && pinchDist !== null) {
-        const dist = pinchSep(e.touches);
-        camDist = Math.max(2, Math.min(20, camDist - (dist - pinchDist) * 0.02));
-        pinchDist = dist;
-        return;
-    }
-    if (!touchOrbit) return;
-    for (let i = 0; i < e.changedTouches.length; i++) {
-        const t = e.changedTouches[i];
-        if (t.identifier !== touchOrbit.id) continue;
-        const dx = t.clientX - touchOrbit.lastX;
-        const dy = t.clientY - touchOrbit.lastY;
-        touchOrbit.lastX = t.clientX;
-        touchOrbit.lastY = t.clientY;
-        const yawQ = new THREE.Quaternion().setFromAxisAngle(_currentUp, -dx * settings.panSpeed * 0.001);
-        camBaseDir.applyQuaternion(yawQ);
-        camBaseDir.addScaledVector(_currentUp, -camBaseDir.dot(_currentUp)).normalize();
-        camPitch = Math.max(0.05, Math.min(1.3, camPitch + dy * settings.panSpeed * 0.001));
-    }
-}, { passive: false });
-
-function onTouchEnd(e) {
-    e.preventDefault();
-    if (touchOrbit) {
-        for (let i = 0; i < e.changedTouches.length; i++) {
-            if (e.changedTouches[i].identifier !== touchOrbit.id) continue;
-            touchOrbit = null;
-            isOrbiting = false;
-            snapBack = true;
-            break;
+            // Physics body — box shape matches actual mesh extents
+            const body = new CANNON.Body({
+                mass: 1,
+                shape: new CANNON.Box(new CANNON.Vec3(he.x, he.y, he.z)),
+                linearDamping:  0.4,
+                angularDamping: 0.1,
+            });
+            body.position.set(
+                itemNormal.x * groundDist,
+                itemNormal.y * groundDist,
+                itemNormal.z * groundDist,
+            );
+            body.quaternion.set(obj.quaternion.x, obj.quaternion.y, obj.quaternion.z, obj.quaternion.w);
+            physicsWorld.addBody(body);
+            body.sleep();
+            physicsObjects.push({ body, mesh: obj, surfaceNormal: itemNormal.clone(), colliding: false, groundDist, meshOriginOffset });
         }
     }
-    if (e.touches.length < 2) pinchDist = null;
+    scene.add(randomObjRoot);
 }
-renderer.domElement.addEventListener('touchend',    onTouchEnd, { passive: false });
-renderer.domElement.addEventListener('touchcancel', onTouchEnd, { passive: false });
+
+{
+    const loadGlb = (url) => new Promise((res, rej) => loader.load(url, (gltf) => res(gltf.scene), undefined, rej));
+    Promise.all([
+        loadGlb(barrelUrl),
+        loadGlb(barrelOpenUrl),
+        loadGlb(boxUrl),
+        loadGlb(boxLargeUrl),
+        loadGlb(boxOpenUrl),
+        loadGlb(boxLargeOpenUrl),
+    ]).then(([barrel, barrelOpen, box, boxLarge, boxOpen, boxLargeOpen]) => {
+        const _bsize   = new THREE.Vector3();
+        const _bcenter = new THREE.Vector3();
+        const _bbox    = new THREE.Box3();
+        [barrel, barrelOpen, box, boxLarge, boxOpen, boxLargeOpen].forEach(obj => {
+            obj.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+            _bbox.setFromObject(obj);
+            _bbox.getSize(_bsize);
+            _bbox.getCenter(_bcenter);
+            obj.userData.halfExtents = _bsize.clone().divideScalar(2);
+            obj.userData.bboxCenterY = _bcenter.y; // local Y of bbox center relative to model origin
+        });
+        barrelTemplates = [barrel, barrelOpen];
+        boxTemplates    = [box, boxLarge, boxOpen, boxLargeOpen];
+        spawnRandomObjects();
+    }).catch(e => console.error('random_objects:', e));
+}
+
+// ─── Controls ─────────────────────────────────────────────────────────────────
+const cam = initCameraControls(renderer.domElement, settings, HOME_PITCH, CAM_DIST);
 
 // ─── Player state ─────────────────────────────────────────────────────────────
 const playerPos = new THREE.Vector3(0, SPHERE_RADIUS, 0); // north pole
@@ -348,6 +373,7 @@ const _lookAt = new THREE.Vector3();
 // ─── Character model ──────────────────────────────────────────────────────────
 let doro = null;
 let isMoving = false;
+let moveTime = 0; // seconds of continuous movement (drives acceleration)
 
 loader.load(walkUrl, (gltf) => {
     const model = gltf.scene;
@@ -375,11 +401,10 @@ window.addEventListener('resize', () => {
 
 const clock = new THREE.Clock();
 
-// Initialise camBaseDir to a valid tangent direction on the first frame
-let camInitialised = false;
 
 initUI(settings, {
     onGrassApply: spawnGrass,
+    onObjApply:   spawnRandomObjects,
     onShadowChange: (size) => {
         if (size === 0) {
             sun.castShadow = false;
@@ -420,13 +445,13 @@ function animate() {
 
     // ── Surface normal ───────────────────────────────────────────────────────
     _up.copy(playerPos).normalize();
-    _currentUp.copy(_up); // expose to event handlers
+    cam.currentUp.copy(_up);
 
     // Initialise camera direction on first frame (perpendicular to playerPos, arbitrary tangent)
-    if (!camInitialised) {
-        camBaseDir.set(0, 0, 1).addScaledVector(_up, -_up.z).normalize();
-        savedCamBaseDir.copy(camBaseDir);
-        camInitialised = true;
+    if (!cam.initialised) {
+        cam.baseDir.set(0, 0, 1).addScaledVector(_up, -_up.z).normalize();
+        cam.savedBaseDir.copy(cam.baseDir);
+        cam.initialised = true;
     }
 
     // ── Keep facingDir tangent to sphere ─────────────────────────────────────
@@ -436,7 +461,7 @@ function animate() {
     // Camera sits in the camBaseDir direction from the player.
     // "Forward" (W) = from camera toward player = -camBaseDir.
     // "Right"   (D) = cross(camFwd, _up).
-    _camFwd.copy(camBaseDir).negate();
+    _camFwd.copy(cam.baseDir).negate();
     _camRight.crossVectors(_camFwd, _up).normalize();
 
     // ── Movement input ────────────────────────────────────────────────────────
@@ -451,14 +476,21 @@ function animate() {
     }
 
     const moving = _moveDir.lengthSq() > 0;
+    const sprinting = moving && keys.has('ShiftLeft');
+    const sprintMult = sprinting ? SPRINT_MULTIPLIER : 1.0;
 
     if (moving !== isMoving) {
         isMoving = moving;
         doro.action.paused = !moving;
-        if (!moving) { doro.action.time = 0; doro.mixer.update(0); }
+        if (!moving) { doro.action.time = 0; doro.mixer.update(0); moveTime = 0; }
     }
 
+    doro.action.timeScale = WALK_ANIM_SPEED * settings.walkSpeed * sprintMult;
+
     if (moving) {
+        moveTime = Math.min(moveTime + delta, ACCEL_TIME);
+        const accelMult = 1 + ACCEL_BONUS * (moveTime / ACCEL_TIME);
+
         _moveDir.normalize();
 
         // Smooth turn toward moveDir
@@ -471,21 +503,21 @@ function animate() {
 
         // Move on sphere surface: rotate playerPos around cross(up, moveDir)
         _rotAxis.crossVectors(_up, _moveDir).normalize();
-        _q.setFromAxisAngle(_rotAxis, settings.moveSpeed * MOVE_SPEED * delta / SPHERE_RADIUS);
+        _q.setFromAxisAngle(_rotAxis, settings.moveSpeed * MOVE_SPEED * accelMult * sprintMult * delta / SPHERE_RADIUS);
         playerPos.applyQuaternion(_q).setLength(SPHERE_RADIUS);
         facingDir.applyQuaternion(_q).normalize();
 
-        // Parallel-transport camBaseDir and savedCamBaseDir so camera stays
+        // Parallel-transport cam.baseDir and cam.savedBaseDir so camera stays
         // stable relative to the sphere surface (doesn't spin as player walks)
-        camBaseDir.applyQuaternion(_q).normalize();
-        savedCamBaseDir.applyQuaternion(_q).normalize();
+        cam.baseDir.applyQuaternion(_q).normalize();
+        cam.savedBaseDir.applyQuaternion(_q).normalize();
     }
 
     // ── Post-move surface re-projection ──────────────────────────────────────
     _up.copy(playerPos).normalize();
     facingDir.addScaledVector(_up, -facingDir.dot(_up)).normalize();
-    camBaseDir.addScaledVector(_up, -camBaseDir.dot(_up)).normalize();
-    savedCamBaseDir.addScaledVector(_up, -savedCamBaseDir.dot(_up)).normalize();
+    cam.baseDir.addScaledVector(_up, -cam.baseDir.dot(_up)).normalize();
+    cam.savedBaseDir.addScaledVector(_up, -cam.savedBaseDir.dot(_up)).normalize();
 
     // ── Building collision ────────────────────────────────────────────────────
     const cosAngle = _up.dot(schoolNormal);
@@ -497,16 +529,104 @@ function animate() {
         playerPos.copy(schoolNormal).multiplyScalar(SPHERE_RADIUS).applyQuaternion(_q).setLength(SPHERE_RADIUS);
         _up.copy(playerPos).normalize();
         facingDir.addScaledVector(_up, -facingDir.dot(_up)).normalize();
-        camBaseDir.addScaledVector(_up, -camBaseDir.dot(_up)).normalize();
-        savedCamBaseDir.addScaledVector(_up, -savedCamBaseDir.dot(_up)).normalize();
+        cam.baseDir.addScaledVector(_up, -cam.baseDir.dot(_up)).normalize();
+        cam.savedBaseDir.addScaledVector(_up, -cam.savedBaseDir.dot(_up)).normalize();
+    }
+
+    // ── Physics step ─────────────────────────────────────────────────────────
+    for (const po of physicsObjects) {
+        if (po.body.sleepState < 2) {
+            // Gravity toward sphere center
+            const p = po.body.position;
+            const len = p.length();
+            if (len > 0.001) {
+                const s = -po.body.mass * PHYS_GRAVITY / len;
+                po.body.force.set(p.x * s, p.y * s, p.z * s);
+            }
+        }
+    }
+    physicsWorld.step(1 / 60, delta, 3);
+
+    // Ground clamp + mesh sync (only for awake/sleepy bodies)
+    for (const po of physicsObjects) {
+        if (po.body.sleepState === 2) continue; // sleeping — no update needed
+        const p = po.body.position;
+        const dist = p.length();
+        if (dist < po.groundDist && dist > 0.001) {
+            // Clamp center to resting height above sphere surface
+            const scale = po.groundDist / dist;
+            p.set(p.x * scale, p.y * scale, p.z * scale);
+            // Reflect inward radial velocity (bounce)
+            const nx = p.x / po.groundDist, ny = p.y / po.groundDist, nz = p.z / po.groundDist;
+            const v = po.body.velocity;
+            const vrad = v.x * nx + v.y * ny + v.z * nz;
+            if (vrad < 0) {
+                v.x -= vrad * (1 + PHYS_RESTITUTION) * nx;
+                v.y -= vrad * (1 + PHYS_RESTITUTION) * ny;
+                v.z -= vrad * (1 + PHYS_RESTITUTION) * nz;
+            }
+        }
+        // Sync Three.js mesh — offset mesh origin from body center in body-local Y direction
+        // so that models with non-centred origins (e.g. origin at base) sit correctly on the
+        // surface even after tumbling.
+        const bq = po.body.quaternion;
+        po.mesh.quaternion.set(bq.x, bq.y, bq.z, bq.w);
+        if (Math.abs(po.meshOriginOffset) > 0.0001) {
+            // Rotate body local Y (0,1,0) into world space via quaternion
+            const byX = 2*(bq.x*bq.y - bq.w*bq.z);
+            const byY = 1 - 2*(bq.x*bq.x + bq.z*bq.z);
+            const byZ = 2*(bq.y*bq.z + bq.w*bq.x);
+            const off = po.meshOriginOffset;
+            po.mesh.position.set(p.x - byX*off, p.y - byY*off, p.z - byZ*off);
+        } else {
+            po.mesh.position.set(p.x, p.y, p.z);
+        }
+        // Keep surfaceNormal current so collision detection follows the object
+        if (dist > 0.001) po.surfaceNormal.set(p.x / dist, p.y / dist, p.z / dist);
+    }
+
+    // ── Random object collision + physics impulse ─────────────────────────────
+    for (const po of physicsObjects) {
+        const objN = po.surfaceNormal;
+        const hit  = _up.dot(objN) > cosObjCollision;
+
+        if (hit) {
+            // Push player out (same arc-distance approach as school)
+            _rotAxis.crossVectors(objN, _up).normalize();
+            _q.setFromAxisAngle(_rotAxis, RANDOM_OBJ_COLLISION_RADIUS / SPHERE_RADIUS);
+            playerPos.copy(objN).multiplyScalar(SPHERE_RADIUS).applyQuaternion(_q).setLength(SPHERE_RADIUS);
+            _up.copy(playerPos).normalize();
+            facingDir.addScaledVector(_up, -facingDir.dot(_up)).normalize();
+            cam.baseDir.addScaledVector(_up, -cam.baseDir.dot(_up)).normalize();
+            cam.savedBaseDir.addScaledVector(_up, -cam.savedBaseDir.dot(_up)).normalize();
+
+            // Apply impulse only on the leading edge of each contact
+            if (!po.colliding) {
+                po.body.wakeUp();
+                // Tangential component of (objN - playerN), projected onto obj surface
+                const dx = objN.x - _up.x, dy = objN.y - _up.y, dz = objN.z - _up.z;
+                const rc = dx * objN.x + dy * objN.y + dz * objN.z;
+                let tx = dx - objN.x * rc, ty = dy - objN.y * rc, tz = dz - objN.z * rc;
+                const tl = Math.sqrt(tx * tx + ty * ty + tz * tz);
+                if (tl > 0.001) { tx /= tl; ty /= tl; tz /= tl; }
+                // 80 % slide along surface + 20 % outward bounce
+                po.body.applyImpulse(new CANNON.Vec3(
+                    (tx * 0.8 + objN.x * 0.2) * PHYS_IMPULSE_STR,
+                    (ty * 0.8 + objN.y * 0.2) * PHYS_IMPULSE_STR,
+                    (tz * 0.8 + objN.z * 0.2) * PHYS_IMPULSE_STR,
+                ));
+            }
+        }
+
+        po.colliding = hit;
     }
 
     // ── Snap camera back toward saved position when right-click released ──────
-    if (snapBack && !isOrbiting) {
-        camBaseDir.lerp(savedCamBaseDir, Math.min(1, SNAP_SPEED * delta)).normalize();
-        camPitch = THREE.MathUtils.lerp(camPitch, savedCamPitch, Math.min(1, SNAP_SPEED * delta));
-        if (camBaseDir.dot(savedCamBaseDir) > 0.9999 && Math.abs(camPitch - savedCamPitch) < 0.001) {
-            snapBack = false;
+    if (cam.snapBack && !cam.isOrbiting) {
+        cam.baseDir.lerp(cam.savedBaseDir, Math.min(1, SNAP_SPEED * delta)).normalize();
+        cam.pitch = THREE.MathUtils.lerp(cam.pitch, cam.savedPitch, Math.min(1, SNAP_SPEED * delta));
+        if (cam.baseDir.dot(cam.savedBaseDir) > 0.9999 && Math.abs(cam.pitch - cam.savedPitch) < 0.001) {
+            cam.snapBack = false;
         }
     }
 
@@ -520,8 +640,8 @@ function animate() {
 
     // ── Camera position ───────────────────────────────────────────────────────
     _targetCamPos.copy(playerPos)
-        .addScaledVector(camBaseDir, camDist * Math.cos(camPitch))
-        .addScaledVector(_up,        camDist * Math.sin(camPitch));
+        .addScaledVector(cam.baseDir, cam.dist * Math.cos(cam.pitch))
+        .addScaledVector(_up,         cam.dist * Math.sin(cam.pitch));
 
     camera.position.lerp(_targetCamPos, Math.min(1, 8 * delta));
     camera.up.copy(_up);
