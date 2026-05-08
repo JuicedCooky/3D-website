@@ -409,7 +409,7 @@ export function createBuildingTooltipSystem(buildingIds) {
 }
 
 export function createBookPanel() {
-    const W = 480, H = 360;
+    const W = 960, H = 720;
 
     const style = document.createElement('style');
     style.textContent = `
@@ -451,11 +451,261 @@ export function createBookPanel() {
         }
         #book-panel-close:hover  { filter: brightness(1.1); }
         #book-panel-close:active { transform: scale(0.97); }
+        #book-panel-content {
+            position: relative;
+            width: 60%;
+            height: 56%;
+            margin-bottom: 16px;
+            overflow: visible;
+        }
+        #skill-tree {
+            position: absolute;
+            inset: 0;
+        }
+        #skill-tree svg {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            overflow: visible;
+            pointer-events: none;
+        }
+        .skill-node {
+            position: absolute;
+            width: 72px;
+            height: 72px;
+            transform: translate(-50%, -50%);
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        .skill-node-icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 6px;
+            background: rgba(180, 120, 40, 0.2);
+            border: 2px solid rgba(120, 70, 10, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 26px;
+            transition: background 0.15s, border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+            box-shadow: inset 0 0 8px rgba(0,0,0,0.12);
+        }
+        .skill-node:hover .skill-node-icon,
+        .skill-node.active .skill-node-icon {
+            background: rgba(210, 155, 60, 0.48);
+            border-color: rgba(160, 100, 20, 0.9);
+            transform: scale(1.12);
+            box-shadow: 0 0 14px rgba(200, 140, 30, 0.5), inset 0 0 8px rgba(0,0,0,0.12);
+        }
+        .skill-node-label {
+            font-family: 'Courier New', monospace;
+            font-size: 9px;
+            font-weight: bold;
+            color: #2a1200;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            text-align: center;
+            margin-top: 4px;
+            white-space: nowrap;
+        }
+        #skill-card {
+            position: fixed;
+            z-index: 300;
+            width: 400px;
+            height: 400px;
+            padding: 14px;
+            background: rgba(245, 228, 185, 0.97);
+            border: 2px solid #7a4a00;
+            border-radius: 3px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.45);
+            font-family: 'Courier New', monospace;
+            color: #1a0800;
+            pointer-events: none;
+            opacity: 0;
+            transform: translateY(4px) scale(0.92);
+            transition: opacity 0.14s ease, transform 0.14s ease;
+        }
+        #skill-card.visible, #skill-card.pinned {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+        #skill-card.pinned { pointer-events: all; }
+        #skill-card-close {
+            position: absolute;
+            top: 5px;
+            right: 6px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 13px;
+            color: #7a4a00;
+            line-height: 1;
+            padding: 2px 4px;
+            display: none;
+            font-family: 'Courier New', monospace;
+        }
+        #skill-card.pinned #skill-card-close { display: block; }
+        #skill-card-close:hover { color: #2a0800; }
+        #skill-card-icon { font-size: 32px; text-align: center; margin-bottom: 8px; }
+        #skill-card-name {
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            text-align: center;
+            margin-bottom: 8px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid rgba(120,70,10,0.3);
+        }
+        #skill-card-desc { font-size: 10px; line-height: 1.65; }
+        #skill-card-desc p { margin: 0 0 6px; }
+        #skill-card-desc ul { margin: 0; padding-left: 14px; }
+        #skill-card-desc li { margin: 2px 0; }
     `;
     document.head.appendChild(style);
 
     const panel = document.createElement('div');
     panel.id = 'book-panel';
+
+    const SKILLS = [
+        { id: 'base',    label: 'General', icon: '🏫',  x: 50, y: 82,
+          desc: 
+          `<p>Guiding others cements mastery. A TA bridges the gap between student and scholar.</p>
+                <ul>
+                    <li><b>GPA: </b>3.64 (A-)</li>
+                    <li><b>+5</b> Patience</li>
+                </ul>` 
+        },
+        { id: 'courses', label: "Core Courses", icon: '📚',  x: 16, y: 22,
+          desc: `<p>Rigorous coursework across multiple disciplines builds a strong academic base.</p><ul><li><b>+10</b> Knowledge</li><li><b>+6</b> Critical Thinking</li></ul>` },
+        { id: 'thesis',  label: "Honors Thesis", icon: '📜',  x: 50, y: 22,
+          desc: `<p>An original research contribution — the culmination of years of focused study.</p><ul><li><b>+12</b> Research</li><li><b>+8</b> Writing</li></ul>` },
+        { id: 'ta',    label: 'Teaching Assistant', icon: '🧑‍🏫',  x: 84, y: 22,
+          desc: 
+          `<p>Guiding others cements mastery. A TA bridges the gap between student and scholar.</p>
+                <ul>
+                    <li><b>GPA: </b>3.64 (A-)</li>
+                    <li><b>Courses Taught: </b>Programming Workshop II
+                        <ul>
+                            <li>test</li>
+                        </ul>
+                    </li>
+                </ul>` 
+        },
+    ];
+    const EDGES = [['base','courses'], ['base','thesis'], ['base','ta']];
+
+    const content = document.createElement('div');
+    content.id = 'book-panel-content';
+
+    const tree = document.createElement('div');
+    tree.id = 'skill-tree';
+
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    EDGES.forEach(([fromId, toId]) => {
+        const from = SKILLS.find(s => s.id === fromId);
+        const to   = SKILLS.find(s => s.id === toId);
+        const line = document.createElementNS(ns, 'line');
+        line.setAttribute('x1', from.x + '%'); line.setAttribute('y1', from.y + '%');
+        line.setAttribute('x2', to.x   + '%'); line.setAttribute('y2', to.y   + '%');
+        line.setAttribute('stroke', 'rgba(120,70,10,0.45)');
+        line.setAttribute('stroke-width', '1.5');
+        line.setAttribute('stroke-dasharray', '5 4');
+        svg.appendChild(line);
+    });
+    tree.appendChild(svg);
+
+    const card = document.createElement('div');
+    card.id = 'skill-card';
+    card.innerHTML = `
+        <button id="skill-card-close">✕</button>
+        <div id="skill-card-icon"></div>
+        <div id="skill-card-name"></div>
+        <div id="skill-card-desc"></div>
+    `;
+    document.body.appendChild(card);
+
+    const cardIcon     = card.querySelector('#skill-card-icon');
+    const cardName     = card.querySelector('#skill-card-name');
+    const cardDesc     = card.querySelector('#skill-card-desc');
+    const cardCloseBtn = card.querySelector('#skill-card-close');
+
+    let pinnedNodeId = null;
+
+    const unpinCard = () => {
+        pinnedNodeId = null;
+        card.classList.remove('pinned', 'visible');
+        document.querySelectorAll('.skill-node.active').forEach(n => n.classList.remove('active'));
+    };
+
+    const populateCard = (skill) => {
+        cardIcon.textContent = skill.icon;
+        cardName.textContent = skill.label;
+        cardDesc.innerHTML = skill.desc;
+    };
+
+    const positionCard = (nodeEl) => {
+        const rect   = nodeEl.getBoundingClientRect();
+        const cardW  = 200;
+        const cardH  = 160;
+        const margin = 10;
+        let left = rect.right + margin;
+        if (left + cardW > window.innerWidth - margin) left = rect.left - cardW - margin;
+        const top = Math.max(margin, rect.top - cardH);
+        card.style.left = left + 'px';
+        card.style.top  = top  + 'px';
+    };
+
+    cardCloseBtn.addEventListener('click', unpinCard);
+
+    SKILLS.forEach(skill => {
+        const node = document.createElement('div');
+        node.className = 'skill-node';
+        node.dataset.skillId = skill.id;
+        node.style.left = skill.x + '%';
+        node.style.top  = skill.y + '%';
+        node.innerHTML = `
+            <div class="skill-node-icon">${skill.icon}</div>
+            <div class="skill-node-label">${skill.label}</div>
+        `;
+
+        node.addEventListener('mouseenter', () => {
+            if (pinnedNodeId) return;
+            populateCard(skill);
+            positionCard(node);
+            card.classList.add('visible');
+        });
+        node.addEventListener('mouseleave', () => {
+            if (pinnedNodeId) return;
+            card.classList.remove('visible');
+        });
+        node.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (pinnedNodeId === skill.id) {
+                unpinCard();
+            } else {
+                if (pinnedNodeId) {
+                    document.querySelector(`.skill-node[data-skill-id="${pinnedNodeId}"]`)?.classList.remove('active');
+                }
+                pinnedNodeId = skill.id;
+                populateCard(skill);
+                positionCard(node);
+                node.classList.add('active');
+                card.classList.remove('visible');
+                card.classList.add('pinned');
+            }
+        });
+
+        tree.appendChild(node);
+    });
+
+    content.appendChild(tree);
+    panel.appendChild(content);
 
     const closeBtn = document.createElement('button');
     closeBtn.id = 'book-panel-close';
@@ -468,6 +718,7 @@ export function createBookPanel() {
     const close = () => {
         if (!_open) return;
         _open = false;
+        unpinCard();
         panel.style.transition = 'transform 0.25s ease-in, opacity 0.2s ease';
         panel.style.transform = 'scale(0.05)';
         panel.style.opacity = '0';
@@ -477,7 +728,12 @@ export function createBookPanel() {
     };
 
     closeBtn.addEventListener('click', close);
-    window.addEventListener('keydown', (e) => { if (e.code === 'Escape') close(); });
+    window.addEventListener('keydown', (e) => {
+        if (e.code === 'Escape') {
+            if (pinnedNodeId !== null) unpinCard();
+            else close();
+        }
+    });
 
     return {
         open(tooltipScreenX, tooltipScreenY) {
