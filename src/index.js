@@ -527,12 +527,25 @@ loader.load(walkUrl, (gltf) => {
     doro = { model, mixer, action };
 }, undefined, (e) => console.error('walk:', e));
 
-window.addEventListener('resize', () => {
+function onResize() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    if (!w || !h) return;
     updateCameraFov();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    cssRenderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setSize(w, h);
+    cssRenderer.setSize(w, h);
     if (parallax) parallax.applyOrientation();
-});
+}
+window.addEventListener('resize', onResize);
+// iOS Safari fires visualViewport resize (not window resize) when the address
+// bar shows/hides. Without this the canvas stays at the initial short height
+// until the user rotates the screen.
+if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', onResize);
+}
+// Re-run after the first paint so any toolbar-driven height changes that
+// happened between script execution and first layout are applied.
+requestAnimationFrame(onResize);
 
 const clock = new THREE.Clock();
 
