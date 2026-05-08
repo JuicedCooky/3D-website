@@ -15,7 +15,7 @@ import boxLargeUrl     from '../3d_models/objects/random_objects/box/box-large.g
 import boxOpenUrl      from '../3d_models/objects/random_objects/box/box-open.glb?url';
 import boxLargeOpenUrl from '../3d_models/objects/random_objects/box/box-large-open.glb?url';
 
-import { initUI, createBuildingTooltipSystem, createBookPanel } from './ui.js';
+import { initUI, createBuildingTooltipSystem, createBookPanel, initMusicPlayer } from './ui.js';
 import { initPhysics, PHYS_IMPULSE_STR } from './physics.js';
 
 
@@ -566,6 +566,7 @@ initUI(settings, {
     onFgSizeChange: (v) => parallax.setLayerSizes(settings.bgLayerSize, v),
 });
 
+initMusicPlayer();
 const tooltipSystem = createBuildingTooltipSystem(['school']);
 const bookPanel = createBookPanel();
 

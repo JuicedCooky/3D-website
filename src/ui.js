@@ -4,6 +4,12 @@ import inputBgUrl from '../assets/ui/tile_0002.png?url';
 import settingsBtnUrl from '../assets/ui/tile_0003.png?url';
 import settingsIcon from '../assets/ui/settings_2.png?url';
 
+import track1Url from '../music/Colorful-Flowers(chosic.com).mp3?url';
+import track2Url from '../music/Daydreams-chosic.com_.mp3?url';
+import track3Url from '../music/Memories-of-Spring(chosic.com).mp3?url';
+import track4Url from '../music/Sonder(chosic.com).mp3?url';
+import track5Url from '../music/When-I-Was-A-Boy(chosic.com).mp3?url';
+
 import tooltipBgUrl  from '../assets/ui/tooltip.png?url';
 import enterIconUrl  from '../assets/ui/enter.png?url';
 import bookCoverUrl  from '../assets/ui/UI_TravelBook_BookCover01a.png?url';
@@ -150,6 +156,42 @@ export function initUI(settings, { onGrassApply, onObjApply, onShadowChange, onB
         }
         #ui-settings-btn:hover  { filter: brightness(1.15); }
         #ui-settings-btn:active { transform: scale(0.94); }
+
+        #ui-film-btn {
+            position: fixed;
+            top: 88px;
+            right: 16px;
+            width: 210px;
+            height: 54px;
+            z-index: 99;
+            cursor: pointer;
+            background: none;
+            border: 16px solid transparent;
+            border-image: url('${settingsBtnUrl}') 11 fill repeat;
+            image-rendering: pixelated;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 9px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            font-weight: bold;
+            color: #1a0a00;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            transition: filter 0.1s;
+        }
+        #ui-film-btn img {
+            width: 20px;
+            height: 20px;
+            image-rendering: pixelated;
+            display: block;
+            flex-shrink: 0;
+        }
+        #ui-film-btn:hover  { filter: brightness(1.15); }
+        #ui-film-btn:active { transform: scale(0.94); }
+        #ui-film-btn.film-on { filter: sepia(0.5) brightness(0.9); }
     `;
     document.head.appendChild(style);
 
@@ -158,6 +200,138 @@ export function initUI(settings, { onGrassApply, onObjApply, onShadowChange, onB
     settingsBtn.title = 'Settings [Tab]';
     settingsBtn.innerHTML = `<img src="${settingsIcon}" alt=""><span>Settings [tab]</span>`;
     document.body.appendChild(settingsBtn);
+
+    // --- Film Effect Button ---
+    const filmBtn = document.createElement('button');
+    filmBtn.id = 'ui-film-btn';
+    filmBtn.title = 'Film Effect [F]';
+    filmBtn.innerHTML = `<img src="${settingsIcon}" alt=""><span>Film FX: ON</span>`;
+    filmBtn.classList.add('film-on');
+    document.body.appendChild(filmBtn);
+
+    // Canvas overlay for the film effect
+    const filmCanvas = document.createElement('canvas');
+    filmCanvas.id = 'film-effect-canvas';
+    Object.assign(filmCanvas.style, {
+        position: 'fixed', top: '0', left: '0',
+        width: '100vw', height: '100vh',
+        pointerEvents: 'none',
+        zIndex: '97',
+        opacity: '1',
+        transition: 'opacity 0.5s',
+    });
+    document.body.appendChild(filmCanvas);
+
+    // Scratch canvas for half-res grain (reused every frame, never added to DOM)
+    const grainCanvas = document.createElement('canvas');
+    const grainCtx = grainCanvas.getContext('2d');
+
+    let filmActive = true;
+    let flickerAlpha = 0;
+    let flickerTimer = 2000;
+    let jitterTimer = 0;
+    let jitterActive = false;
+    let jitterFrames = 0;
+    let jitterY = 0, jitterH = 0, jitterX = 0;
+
+    const resizeFilmCanvas = () => {
+        filmCanvas.width  = window.innerWidth;
+        filmCanvas.height = window.innerHeight;
+    };
+    resizeFilmCanvas();
+    window.addEventListener('resize', resizeFilmCanvas);
+
+    const drawFilm = () => {
+        requestAnimationFrame(drawFilm);
+        if (!filmActive) return;
+
+        const ctx = filmCanvas.getContext('2d');
+        const w = filmCanvas.width;
+        const h = filmCanvas.height;
+
+        ctx.clearRect(0, 0, w, h);
+
+        // Film grain — rendered at half resolution then scaled up for performance
+        const gw = Math.ceil(w / 2);
+        const gh = Math.ceil(h / 2);
+        if (grainCanvas.width !== gw)  grainCanvas.width  = gw;
+        if (grainCanvas.height !== gh) grainCanvas.height = gh;
+        const id = grainCtx.createImageData(gw, gh);
+        const d  = id.data;
+        for (let i = 0; i < d.length; i += 4) {
+            const v  = (Math.random() * 80) | 0;
+            d[i] = d[i + 1] = d[i + 2] = v;
+            d[i + 3] = (Math.random() * 38) | 0;
+        }
+        grainCtx.putImageData(id, 0, 0);
+        ctx.drawImage(grainCanvas, 0, 0, w, h);
+
+        // Warm lofi tint
+        ctx.fillStyle = 'rgba(255, 200, 80, 0.04)';
+        ctx.fillRect(0, 0, w, h);
+
+        // Scanlines — one dark line every 3px
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.14)';
+        for (let y = 0; y < h; y += 3) {
+            ctx.fillRect(0, y, w, 1);
+        }
+
+        // VHS horizontal jitter glitch
+        jitterTimer -= 16;
+        if (jitterTimer <= 0) {
+            jitterTimer  = 1200 + Math.random() * 5000;
+            jitterActive = true;
+            jitterFrames = 1 + Math.floor(Math.random() * 3);
+            jitterY = Math.floor(Math.random() * (h - 20));
+            jitterH = 2  + Math.floor(Math.random() * 10);
+            jitterX = Math.floor((Math.random() - 0.5) * 12);
+        }
+        if (jitterActive && jitterFrames > 0) {
+            jitterFrames--;
+            if (jitterFrames === 0) jitterActive = false;
+            if (jitterX !== 0) {
+                const strip = ctx.getImageData(0, jitterY, w, jitterH);
+                ctx.putImageData(strip, jitterX, jitterY);
+            }
+        }
+
+        // Vignette
+        const vg = ctx.createRadialGradient(w * 0.5, h * 0.5, h * 0.1, w * 0.5, h * 0.5, Math.hypot(w, h) * 0.65);
+        vg.addColorStop(0,   'rgba(0,0,0,0)');
+        vg.addColorStop(0.5, 'rgba(0,0,0,0)');
+        vg.addColorStop(1,   'rgba(0,0,0,0.6)');
+        ctx.fillStyle = vg;
+        ctx.fillRect(0, 0, w, h);
+
+        // Screen flicker
+        flickerTimer -= 16;
+        if (flickerTimer <= 0) {
+            flickerTimer = 800 + Math.random() * 4000;
+            flickerAlpha = 0.05 + Math.random() * 0.1;
+        }
+        if (flickerAlpha > 0.001) {
+            ctx.fillStyle = `rgba(255,255,230,${flickerAlpha.toFixed(3)})`;
+            ctx.fillRect(0, 0, w, h);
+            flickerAlpha *= 0.78;
+        } else {
+            flickerAlpha = 0;
+        }
+    };
+    requestAnimationFrame(drawFilm);
+
+    filmBtn.addEventListener('click', () => {
+        filmActive = !filmActive;
+        filmCanvas.style.opacity = filmActive ? '1' : '0';
+        filmBtn.classList.toggle('film-on', filmActive);
+        filmBtn.querySelector('span').textContent = filmActive ? 'Film FX: ON' : 'Film FX';
+    });
+
+    window.addEventListener('keydown', (e) => {
+        if (e.code === 'KeyF' && !e.ctrlKey && !e.metaKey && document.activeElement.tagName !== 'INPUT') {
+            filmBtn.click();
+        }
+    });
+    // --- End Film Effect ---
 
     const panel = document.createElement('div');
     panel.id = 'settings-panel';
@@ -290,6 +464,160 @@ export function initUI(settings, { onGrassApply, onObjApply, onShadowChange, onB
             panel.classList.toggle('visible');
         }
     });
+}
+
+export function initMusicPlayer() {
+    const TRACKS = [
+        { url: track1Url, title: 'Colorful Flowers',  artist: 'Tokyo Music Walker' },
+        { url: track2Url, title: 'Daydreams',          artist: 'Purrple Cat'        },
+        { url: track3Url, title: 'Memories of Spring', artist: 'Tokyo Music Walker' },
+        { url: track4Url, title: 'Sonder',             artist: 'Purrple Cat'        },
+        { url: track5Url, title: 'When I Was A Boy',   artist: 'Tokyo Music Walker' },
+    ];
+
+    let currentIdx = 0;
+    let isPlaying  = false;
+
+    const audio = new Audio();
+    audio.volume = 0.6;
+
+    const style = document.createElement('style');
+    style.textContent = `
+        #music-player {
+            position: fixed;
+            top: 14px;
+            left: 16px;
+            z-index: 99;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 3px;
+            border: 16px solid transparent;
+            border-image: url('${settingsBtnUrl}') 11 fill repeat;
+            image-rendering: pixelated;
+            padding: 2px 6px;
+            font-family: 'Courier New', monospace;
+            color: #1a0a00;
+            min-width: 180px;
+        }
+        #music-track-info {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+            overflow: hidden;
+        }
+        #music-title {
+            font-size: 11px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 170px;
+            text-align: center;
+        }
+        #music-artist {
+            font-size: 9px;
+            opacity: 0.65;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            white-space: nowrap;
+        }
+        #music-controls {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+        }
+        .music-btn {
+            width: 42px;
+            padding: 4px 0;
+            background-image: url('${btnUrl}');
+            background-size: 100% 100%;
+            image-rendering: pixelated;
+            border: none;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            font-weight: bold;
+            color: #1a0a00;
+            background-color: transparent;
+            transition: filter 0.1s;
+            line-height: 1;
+        }
+        .music-btn:hover  { filter: brightness(1.15); }
+        .music-btn:active { transform: scale(0.94); }
+        #music-play-btn { width: 50px; font-size: 14px; }
+    `;
+    document.head.appendChild(style);
+
+    const player = document.createElement('div');
+    player.id = 'music-player';
+    player.innerHTML = `
+        <div id="music-track-info">
+            <div id="music-title"></div>
+            <div id="music-artist"></div>
+        </div>
+        <div id="music-controls">
+            <button class="music-btn" id="music-prev-btn">&#9664;&#9664;</button>
+            <button class="music-btn" id="music-play-btn">&#9654;</button>
+            <button class="music-btn" id="music-next-btn">&#9654;&#9654;</button>
+        </div>
+    `;
+    document.body.appendChild(player);
+
+    const titleEl   = player.querySelector('#music-title');
+    const artistEl  = player.querySelector('#music-artist');
+    const playBtn   = player.querySelector('#music-play-btn');
+    const prevBtn   = player.querySelector('#music-prev-btn');
+    const nextBtn   = player.querySelector('#music-next-btn');
+
+    const loadTrack = (idx) => {
+        currentIdx = ((idx % TRACKS.length) + TRACKS.length) % TRACKS.length;
+        const t = TRACKS[currentIdx];
+        audio.src = t.url;
+        titleEl.textContent  = t.title;
+        artistEl.textContent = t.artist;
+    };
+
+    const setPlaying = (playing) => {
+        isPlaying = playing;
+        playBtn.innerHTML = playing ? '&#9646;&#9646;' : '&#9654;';
+    };
+
+    const play = () => { audio.play(); setPlaying(true); };
+    const pause = () => { audio.pause(); setPlaying(false); };
+
+    playBtn.addEventListener('click', () => {
+        if (isPlaying) pause();
+        else play();
+    });
+
+    prevBtn.addEventListener('click', () => {
+        loadTrack(currentIdx - 1);
+        if (isPlaying) play();
+    });
+
+    nextBtn.addEventListener('click', () => {
+        loadTrack(currentIdx + 1);
+        if (isPlaying) play();
+    });
+
+    audio.addEventListener('ended', () => {
+        loadTrack(currentIdx + 1);
+        play();
+    });
+
+    loadTrack(Math.floor(Math.random() * TRACKS.length));
+
+    const startOnInteraction = () => {
+        play();
+        window.removeEventListener('click',   startOnInteraction);
+        window.removeEventListener('keydown', startOnInteraction);
+    };
+    window.addEventListener('click',   startOnInteraction);
+    window.addEventListener('keydown', startOnInteraction);
 }
 
 export function createBuildingTooltipSystem(buildingIds) {
@@ -583,7 +911,16 @@ export function createBookPanel() {
         { id: 'courses', label: "Core Courses", icon: '📚',  x: 16, y: 22,
           desc: `<p>Rigorous coursework across multiple disciplines builds a strong academic base.</p><ul><li><b>+10</b> Knowledge</li><li><b>+6</b> Critical Thinking</li></ul>` },
         { id: 'thesis',  label: "Honors Thesis", icon: '📜',  x: 50, y: 22,
-          desc: `<p>An original research contribution — the culmination of years of focused study.</p><ul><li><b>+12</b> Research</li><li><b>+8</b> Writing</li></ul>` },
+          desc: 
+          `<p>An original research contribution — the culmination of years of focused study.</p>
+          <b>Thesis Project: Continual Learning Methods on Multi-Domain Tasks.</b>
+          <ul>
+            <li>Implemented and experimented with various VLM pertaining to Zero-shot learning with Continual features.</li>
+            <li>Deployed and tested various continual learning methods to be evaluated on multiple domains.</li>
+            <li>Empirically determined performances and differences between multiple methods.</li>
+            <li>Used various tools to deploy large scale training including Sharcnet/Alliance Cananda’s research infrastructure.</li>
+            <li>Designed an interesting yet easily interpretable data visualization pipeline</li>
+        </ul>` },
         { id: 'ta',    label: 'Teaching Assistant', icon: '🧑‍🏫',  x: 84, y: 22,
           desc: 
           `<p>Guiding others cements mastery. A TA bridges the gap between student and scholar.</p>
