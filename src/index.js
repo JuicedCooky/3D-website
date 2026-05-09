@@ -16,7 +16,7 @@ import {
     gundamState,
     theatreScreenMesh, theatreWorldQuaternion, advanceTheatreSlide,
     schoolCss3d, gundamCss3d, theatreCss3d,
-    schoolTooltipPos, gundamTooltipPos,
+    schoolTooltipPos, gundamTooltipPos, theatreTooltipPos,
     initUniqueModels, initTooltipCss3d,
 } from './uniqueModels.js';
 
@@ -407,7 +407,9 @@ const theatreSlideshow = createTheatreSlideshow();
 const cssScene = new THREE.Scene();
 initTooltipCss3d(tooltipSystem, cssScene);
 
-let _currentArcDist = Infinity;
+let _currentArcDist       = Infinity;
+let _currentGundamArcDist  = Infinity;
+let _currentTheatreArcDist = Infinity;
 
 // ─── Theatre zoom state ────────────────────────────────────────────────────────
 let theatreZoomActive    = false;
@@ -428,6 +430,7 @@ function exitTheatreZoom() {
     theatreZoomActive = false;
     theatreSlideshow.hide();
     setGameUIVisible(true);
+    if (doro) doro.model.visible = true;
 }
 
 tooltipSystem.getElement('school').querySelector('.bld-tt-shell').addEventListener('click', (e) => {
@@ -453,6 +456,7 @@ tooltipSystem.getElement('theatre').querySelector('.bld-tt-shell').addEventListe
     _theatreCamTarget.copy(_theatreScratch).addScaledVector(_screenNormal, 3.5);
     _theatreLookAt.copy(_theatreScratch);
 
+    if (doro) doro.model.visible = false;
     setGameUIVisible(false);
     theatreSlideshow.show({
         onClose: exitTheatreZoom,
@@ -465,11 +469,19 @@ window.addEventListener('keydown', (e) => {
     if (e.code === 'Escape' && theatreZoomActive) { exitTheatreZoom(); return; }
     if (e.code === 'ArrowLeft'  && theatreZoomActive) { advanceTheatreSlide(-1); return; }
     if (e.code === 'ArrowRight' && theatreZoomActive) { advanceTheatreSlide(1);  return; }
-    if (e.code === 'Enter' && _currentArcDist < SCHOOL_NEAR_ARC_DIST && !bookPanel.isOpen) {
-        const v = schoolTooltipPos.clone().project(camera);
-        const sx = ( v.x * 0.5 + 0.5) * window.innerWidth;
-        const sy = (-v.y * 0.5 + 0.5) * window.innerHeight;
-        bookPanel.open(sx, sy);
+    if (e.code === 'Enter') {
+        if (_currentArcDist < SCHOOL_NEAR_ARC_DIST && !bookPanel.isOpen) {
+            const v = schoolTooltipPos.clone().project(camera);
+            const sx = ( v.x * 0.5 + 0.5) * window.innerWidth;
+            const sy = (-v.y * 0.5 + 0.5) * window.innerHeight;
+            bookPanel.open(sx, sy);
+        } else if (_currentGundamArcDist < GUNDAM_NEAR_ARC_DIST) {
+            if (gundamState && gundamState.animPhase !== 'playing') {
+                tooltipSystem.getElement('gundam').querySelector('.bld-tt-shell').click();
+            }
+        } else if (_currentTheatreArcDist < THEATRE_NEAR_ARC_DIST && !theatreZoomActive && theatreScreenMesh) {
+            tooltipSystem.getElement('theatre').querySelector('.bld-tt-shell').click();
+        }
     }
 });
 
@@ -629,8 +641,10 @@ function animate() {
     }
 
     // ── Building tooltips (CSS3D) ─────────────────────────────────────────────
-    const gundamArcDist   = Math.acos(Math.max(-1, Math.min(1, _up.dot(gundamNormal))))  * SPHERE_RADIUS;
-    const theatreArcDist  = Math.acos(Math.max(-1, Math.min(1, _up.dot(theatreNormal)))) * SPHERE_RADIUS;
+    _currentGundamArcDist  = Math.acos(Math.max(-1, Math.min(1, _up.dot(gundamNormal))))  * SPHERE_RADIUS;
+    _currentTheatreArcDist = Math.acos(Math.max(-1, Math.min(1, _up.dot(theatreNormal)))) * SPHERE_RADIUS;
+    const gundamArcDist  = _currentGundamArcDist;
+    const theatreArcDist = _currentTheatreArcDist;
     schoolCss3d.quaternion.copy(camera.quaternion);
     gundamCss3d.quaternion.copy(camera.quaternion);
     theatreCss3d.quaternion.copy(camera.quaternion);

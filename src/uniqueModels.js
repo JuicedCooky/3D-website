@@ -4,6 +4,7 @@ import schoolUrl      from '../3d_models/objects/school.glb?url';
 import gundamIdleUrl    from '../3d_models/objects/gundam/rx-78_idle-3.glb?url';
 import gundamStandUpUrl from '../3d_models/objects/gundam/rx-78_stand-up-2.glb?url';
 import theatreUrl from '../3d_models/objects/theatre.glb?url';
+import slide0Url from '../assets/slideshow/Screenshot 2026-05-09 042521.png?url';
 
 // ─── School placement config ───────────────────────────────────────────────────
 export const SCHOOL_THETA            = 0.3;
@@ -61,7 +62,7 @@ export const theatreWorldQuaternion = new THREE.Quaternion();
 
 // ─── Theatre slideshow ─────────────────────────────────────────────────────────
 export const THEATRE_SLIDES = [
-    { label: 'Project 1', bg: '#1a1a2e', accent: '#e94560' },
+    { label: 'Project 1', bg: '#1a1a2e', accent: '#e94560', imgUrl: slide0Url },
     { label: 'Project 2', bg: '#0f3460', accent: '#53d8fb' },
     { label: 'Project 3', bg: '#16213e', accent: '#f5a623' },
 ];
@@ -70,15 +71,8 @@ let _slideCanvas  = null;
 let _slideCtx     = null;
 let _slideTexture = null;
 
-function _drawSlide(idx) {
-    if (!_slideCtx) return;
-    const slide = THEATRE_SLIDES[idx % THEATRE_SLIDES.length];
+function _drawSlideFallback(slide, idx) {
     const w = _slideCanvas.width, h = _slideCanvas.height;
-
-    _slideCtx.save();
-    _slideCtx.translate(w, 0);
-    _slideCtx.scale(-1, 1);
-
     _slideCtx.fillStyle = slide.bg;
     _slideCtx.fillRect(0, 0, w, h);
     _slideCtx.strokeStyle = 'rgba(255,255,255,0.07)';
@@ -96,9 +90,39 @@ function _drawSlide(idx) {
     _slideCtx.font = '22px monospace';
     _slideCtx.fillStyle = 'rgba(255,255,255,0.45)';
     _slideCtx.fillText(`${idx + 1} / ${THEATRE_SLIDES.length}`, w / 2, h * 0.72);
+}
 
-    _slideCtx.restore();
-    if (_slideTexture) _slideTexture.needsUpdate = true;
+function _drawSlide(idx) {
+    if (!_slideCtx) return;
+    const slide = THEATRE_SLIDES[idx % THEATRE_SLIDES.length];
+    const w = _slideCanvas.width, h = _slideCanvas.height;
+
+    if (slide.imgUrl) {
+        const img = new Image();
+        img.onload = () => {
+            // Clear physical canvas to black first (outside any transform)
+            _slideCtx.fillStyle = '#000';
+            _slideCtx.fillRect(0, 0, w, h);
+            // Draw image with H-flip, contained with margin on all sides
+            const PAD = 16;
+            const scale = Math.min((w - PAD * 2) / img.naturalWidth, (h - PAD * 2) / img.naturalHeight);
+            const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
+            _slideCtx.save();
+            _slideCtx.translate(w, 0);
+            _slideCtx.scale(-1, 1);
+            _slideCtx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+            _slideCtx.restore();
+            if (_slideTexture) _slideTexture.needsUpdate = true;
+        };
+        img.src = slide.imgUrl;
+    } else {
+        _slideCtx.save();
+        _slideCtx.translate(w, 0);
+        _slideCtx.scale(-1, 1);
+        _drawSlideFallback(slide, idx);
+        _slideCtx.restore();
+        if (_slideTexture) _slideTexture.needsUpdate = true;
+    }
 }
 
 export function advanceTheatreSlide(dir) {
@@ -186,8 +210,7 @@ export function initUniqueModels(scene, loader, SPHERE_RADIUS) {
         });
 
         if (theatreScreenMesh) {
-            // Normalize UVs to [0,1] — the atlas UVs only cover a sub-region,
-            // which crops our canvas texture to a sliver of the screen.
+            // Normalize atlas UVs to [0,1].
             const uvAttr = theatreScreenMesh.geometry.attributes.uv;
             if (uvAttr) {
                 let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
@@ -212,7 +235,11 @@ export function initUniqueModels(scene, loader, SPHERE_RADIUS) {
             _slideCtx           = _slideCanvas.getContext('2d');
             _slideTexture          = new THREE.CanvasTexture(_slideCanvas);
             _slideTexture.colorSpace = THREE.SRGBColorSpace;
-            _slideTexture.rotation = -Math.PI / 2;
+            _slideTexture.wrapS = THREE.ClampToEdgeWrapping;
+            _slideTexture.wrapT = THREE.ClampToEdgeWrapping;
+            _slideTexture.repeat.set(3.890, 1.570);
+            _slideTexture.offset.set(-0.485, 0.000);
+            _slideTexture.rotation = -1.571;
             _slideTexture.center.set(0.5, 0.5);
             _drawSlide(0);
 
