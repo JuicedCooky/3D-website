@@ -8,12 +8,14 @@ import worldUrl from '../3d_models/world.glb?url';
 import grassUrl from '../3d_models/objects/grass.glb?url';
 
 import {
-    schoolNormal, gundamNormal,
+    schoolNormal, gundamNormal, theatreNormal,
     cosSchoolGrassExclusion,
     SCHOOL_COLLISION_RADIUS, SCHOOL_NEAR_ARC_DIST,
     GUNDAM_NEAR_ARC_DIST,
+    THEATRE_NEAR_ARC_DIST,
     gundamState,
-    schoolCss3d, gundamCss3d,
+    theatreScreenMesh, theatreWorldQuaternion, advanceTheatreSlide,
+    schoolCss3d, gundamCss3d, theatreCss3d,
     schoolTooltipPos, gundamTooltipPos,
     initUniqueModels, initTooltipCss3d,
 } from './uniqueModels.js';
@@ -26,7 +28,7 @@ import {
     initScatter,
 } from './scatter.js';
 
-import { initUI, createBuildingTooltipSystem, createBookPanel, initMusicPlayer } from './ui.js';
+import { initUI, createBuildingTooltipSystem, createBookPanel, initMusicPlayer, createTheatreSlideshow } from './ui.js';
 import { initPhysics, PHYS_IMPULSE_STR } from './physics.js';
 
 
@@ -398,13 +400,35 @@ initUI(settings, {
 });
 
 initMusicPlayer();
-const tooltipSystem = createBuildingTooltipSystem(['school', 'gundam']);
+const tooltipSystem = createBuildingTooltipSystem(['school', 'gundam', 'theatre']);
 const bookPanel = createBookPanel();
+const theatreSlideshow = createTheatreSlideshow();
 
 const cssScene = new THREE.Scene();
 initTooltipCss3d(tooltipSystem, cssScene);
 
 let _currentArcDist = Infinity;
+
+// ─── Theatre zoom state ────────────────────────────────────────────────────────
+let theatreZoomActive    = false;
+const _theatreCamTarget  = new THREE.Vector3();
+const _theatreLookAt     = new THREE.Vector3();
+const _theatreScratch    = new THREE.Vector3();
+const _screenNormal      = new THREE.Vector3();
+
+const _gameUIIds = ['ui-settings-btn', 'ui-film-btn', 'music-player'];
+function setGameUIVisible(visible) {
+    _gameUIIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = visible ? '' : 'none';
+    });
+}
+
+function exitTheatreZoom() {
+    theatreZoomActive = false;
+    theatreSlideshow.hide();
+    setGameUIVisible(true);
+}
 
 tooltipSystem.getElement('school').querySelector('.bld-tt-shell').addEventListener('click', (e) => {
     if (!bookPanel.isOpen) bookPanel.open(e.clientX, e.clientY);
@@ -418,7 +442,29 @@ tooltipSystem.getElement('gundam').querySelector('.bld-tt-shell').addEventListen
     gundamState.animPhase = 'playing';
 });
 
+tooltipSystem.getElement('theatre').querySelector('.bld-tt-shell').addEventListener('click', () => {
+    if (theatreZoomActive || !theatreScreenMesh) return;
+    theatreZoomActive = true;
+
+    theatreScreenMesh.getWorldPosition(_theatreScratch);
+    // Derive screen facing from the theatre's known world quaternion (local +Z = forward)
+    _screenNormal.set(1, 0, 0).applyQuaternion(theatreWorldQuaternion).normalize();
+
+    _theatreCamTarget.copy(_theatreScratch).addScaledVector(_screenNormal, 3.5);
+    _theatreLookAt.copy(_theatreScratch);
+
+    setGameUIVisible(false);
+    theatreSlideshow.show({
+        onClose: exitTheatreZoom,
+        onPrev:  () => advanceTheatreSlide(-1),
+        onNext:  () => advanceTheatreSlide(1),
+    });
+});
+
 window.addEventListener('keydown', (e) => {
+    if (e.code === 'Escape' && theatreZoomActive) { exitTheatreZoom(); return; }
+    if (e.code === 'ArrowLeft'  && theatreZoomActive) { advanceTheatreSlide(-1); return; }
+    if (e.code === 'ArrowRight' && theatreZoomActive) { advanceTheatreSlide(1);  return; }
     if (e.code === 'Enter' && _currentArcDist < SCHOOL_NEAR_ARC_DIST && !bookPanel.isOpen) {
         const v = schoolTooltipPos.clone().project(camera);
         const sx = ( v.x * 0.5 + 0.5) * window.innerWidth;
@@ -449,13 +495,15 @@ function animate() {
     _camRight.crossVectors(_camFwd, _up).normalize();
 
     _moveDir.set(0, 0, 0);
-    if (keys.has('KeyW')) _moveDir.add(_camFwd);
-    if (keys.has('KeyS')) _moveDir.sub(_camFwd);
-    if (keys.has('KeyA')) _moveDir.sub(_camRight);
-    if (keys.has('KeyD')) _moveDir.add(_camRight);
-    if (joystick.x !== 0 || joystick.y !== 0) {
-        _moveDir.addScaledVector(_camFwd,  joystick.y);
-        _moveDir.addScaledVector(_camRight, joystick.x);
+    if (!theatreZoomActive) {
+        if (keys.has('KeyW')) _moveDir.add(_camFwd);
+        if (keys.has('KeyS')) _moveDir.sub(_camFwd);
+        if (keys.has('KeyA')) _moveDir.sub(_camRight);
+        if (keys.has('KeyD')) _moveDir.add(_camRight);
+        if (joystick.x !== 0 || joystick.y !== 0) {
+            _moveDir.addScaledVector(_camFwd,  joystick.y);
+            _moveDir.addScaledVector(_camRight, joystick.x);
+        }
     }
 
     const moving = _moveDir.lengthSq() > 0;
@@ -566,19 +614,26 @@ function animate() {
     if (gundamState && gundamState.animPhase === 'playing') gundamState.mixer.update(delta);
 
     // ── Camera position ───────────────────────────────────────────────────────
-    _targetCamPos.copy(playerPos)
-        .addScaledVector(cam.baseDir, cam.dist * Math.cos(cam.pitch))
-        .addScaledVector(_up,         cam.dist * Math.sin(cam.pitch));
-
-    camera.position.lerp(_targetCamPos, Math.min(1, 8 * delta));
-    camera.up.copy(_up);
-    _lookAt.copy(playerPos).addScaledVector(_up, 0.8);
-    camera.lookAt(_lookAt);
+    if (theatreZoomActive) {
+        camera.position.lerp(_theatreCamTarget, Math.min(1, 4 * delta));
+        camera.up.copy(theatreNormal);
+        camera.lookAt(_theatreLookAt);
+    } else {
+        _targetCamPos.copy(playerPos)
+            .addScaledVector(cam.baseDir, cam.dist * Math.cos(cam.pitch))
+            .addScaledVector(_up,         cam.dist * Math.sin(cam.pitch));
+        camera.position.lerp(_targetCamPos, Math.min(1, 8 * delta));
+        camera.up.copy(_up);
+        _lookAt.copy(playerPos).addScaledVector(_up, 0.8);
+        camera.lookAt(_lookAt);
+    }
 
     // ── Building tooltips (CSS3D) ─────────────────────────────────────────────
-    const gundamArcDist = Math.acos(Math.max(-1, Math.min(1, _up.dot(gundamNormal)))) * SPHERE_RADIUS;
+    const gundamArcDist   = Math.acos(Math.max(-1, Math.min(1, _up.dot(gundamNormal))))  * SPHERE_RADIUS;
+    const theatreArcDist  = Math.acos(Math.max(-1, Math.min(1, _up.dot(theatreNormal)))) * SPHERE_RADIUS;
     schoolCss3d.quaternion.copy(camera.quaternion);
     gundamCss3d.quaternion.copy(camera.quaternion);
+    theatreCss3d.quaternion.copy(camera.quaternion);
     tooltipSystem.update([
         {
             id: 'school',
@@ -589,6 +644,11 @@ function animate() {
             id: 'gundam',
             visible: gundamNormal.dot(camera.position) > 0,
             isNear:  gundamArcDist < GUNDAM_NEAR_ARC_DIST,
+        },
+        {
+            id: 'theatre',
+            visible: !theatreZoomActive && theatreNormal.dot(camera.position) > 0,
+            isNear:  theatreArcDist < THEATRE_NEAR_ARC_DIST,
         },
     ]);
 

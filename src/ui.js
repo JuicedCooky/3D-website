@@ -1085,10 +1085,7 @@ export function createBookPanel() {
             e.stopPropagation();
             if (pinnedNodeId === skill.id) {
                 unpinCard();
-            } else {
-                if (pinnedNodeId) {
-                    document.querySelector(`.skill-node[data-skill-id="${pinnedNodeId}"]`)?.classList.remove('active');
-                }
+            } else if (!pinnedNodeId) {
                 pinnedNodeId = skill.id;
                 populateCard(skill);
                 positionCard(node);
@@ -1157,5 +1154,105 @@ export function createBookPanel() {
         },
         close,
         get isOpen() { return _open; },
+    };
+}
+
+export function createTheatreSlideshow() {
+    const style = document.createElement('style');
+    style.textContent = `
+        #theatre-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 150;
+            pointer-events: none;
+        }
+        #theatre-overlay.active { display: block; }
+
+        #theatre-prev-btn, #theatre-next-btn {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            pointer-events: all;
+            width: 52px;
+            height: 52px;
+            background-image: url('${btnUrl}');
+            background-size: 100% 100%;
+            image-rendering: pixelated;
+            border: none;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 22px;
+            font-weight: bold;
+            color: #1a0a00;
+            background-color: transparent;
+            transition: filter 0.1s;
+        }
+        #theatre-prev-btn { left: 24px; }
+        #theatre-next-btn { right: 24px; }
+        #theatre-prev-btn:hover, #theatre-next-btn:hover { filter: brightness(1.15); }
+        #theatre-prev-btn:active { transform: translateY(-50%) scale(0.94); }
+        #theatre-next-btn:active { transform: translateY(-50%) scale(0.94); }
+
+        #theatre-close-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            pointer-events: all;
+            width: 56px;
+            height: 34px;
+            background-image: url('${btnUrl}');
+            background-size: 100% 100%;
+            image-rendering: pixelated;
+            border: none;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 16px;
+            font-weight: bold;
+            color: #1a0a00;
+            background-color: transparent;
+            transition: filter 0.1s;
+        }
+        #theatre-close-btn:hover  { filter: brightness(1.15); }
+        #theatre-close-btn:active { transform: scale(0.94); }
+
+        @media (max-width: 520px) {
+            #theatre-prev-btn, #theatre-next-btn { width: 38px; height: 38px; font-size: 16px; }
+            #theatre-prev-btn { left: 8px; }
+            #theatre-next-btn { right: 8px; }
+            #theatre-close-btn { width: 44px; height: 28px; font-size: 13px; top: 12px; right: 12px; }
+        }
+    `;
+    document.head.appendChild(style);
+
+    const overlay = document.createElement('div');
+    overlay.id = 'theatre-overlay';
+    overlay.innerHTML = `
+        <button id="theatre-prev-btn">&#9664;</button>
+        <button id="theatre-next-btn">&#9654;</button>
+        <button id="theatre-close-btn">&#10005;</button>
+    `;
+    document.body.appendChild(overlay);
+
+    const prevBtn  = overlay.querySelector('#theatre-prev-btn');
+    const nextBtn  = overlay.querySelector('#theatre-next-btn');
+    const closeBtn = overlay.querySelector('#theatre-close-btn');
+
+    let _onClose = null, _onPrev = null, _onNext = null;
+
+    closeBtn.addEventListener('click', () => _onClose?.());
+    prevBtn.addEventListener('click',  () => _onPrev?.());
+    nextBtn.addEventListener('click',  () => _onNext?.());
+
+    return {
+        show({ onClose, onPrev, onNext }) {
+            _onClose = onClose;
+            _onPrev  = onPrev;
+            _onNext  = onNext;
+            overlay.classList.add('active');
+        },
+        hide() {
+            overlay.classList.remove('active');
+        },
     };
 }
