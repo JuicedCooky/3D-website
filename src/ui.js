@@ -18,7 +18,7 @@ import border2Url   from '../assets/ui/tooltip_border/UI_TravelBook_SlotCursor01
 import border3Url   from '../assets/ui/tooltip_border/UI_TravelBook_SlotCursor01a_3.png?url';
 import border4Url   from '../assets/ui/tooltip_border/UI_TravelBook_SlotCursor01a_4.png?url';
 
-export function initUI(settings, { onGrassApply, onObjApply, onShadowChange, onBgSizeChange, onFgSizeChange }) {
+export function initUI(settings, { onGrassApply, onGrassShadowChange, onObjApply, onShadowChange, onBgSizeChange, onFgSizeChange }) {
     const style = document.createElement('style');
     style.textContent = `
         #settings-panel {
@@ -27,7 +27,8 @@ export function initUI(settings, { onGrassApply, onObjApply, onShadowChange, onB
             left: 50%;
             transform: translate(-50%, -50%);
             width: 320px;
-            padding: 12px; 
+            max-width: calc(100vw - 64px);
+            padding: 12px;
             
             /* 1. Set the visual thickness of the border on screen */
             /* Using 20px - 30px usually looks good for low-res pixel art */
@@ -192,6 +193,13 @@ export function initUI(settings, { onGrassApply, onObjApply, onShadowChange, onB
         #ui-film-btn:hover  { filter: brightness(1.15); }
         #ui-film-btn:active { transform: scale(0.94); }
         #ui-film-btn.film-on { filter: sepia(0.5) brightness(0.9); }
+
+        @media (max-width: 520px) {
+            #ui-settings-btn { width: 160px; height: 52px; font-size: 13px; right: 8px; }
+            #ui-settings-btn img { width: 18px; height: 18px; }
+            #ui-film-btn { width: 160px; height: 44px; font-size: 12px; right: 8px; top: 70px; }
+            #ui-film-btn img { width: 16px; height: 16px; }
+        }
     `;
     document.head.appendChild(style);
 
@@ -381,6 +389,13 @@ export function initUI(settings, { onGrassApply, onObjApply, onShadowChange, onB
 
         <div class="cfg-section">Grass</div>
         <div class="cfg-row">
+            <label>Shadows</label>
+            <select id="cfg-grass-shadow">
+                <option value="0">Off</option>
+                <option value="1">On</option>
+            </select>
+        </div>
+        <div class="cfg-row">
             <label>Count</label>
             <input type="number" id="cfg-count" min="0" max="5000" step="50" value="${settings.grassCount}">
         </div>
@@ -407,6 +422,7 @@ export function initUI(settings, { onGrassApply, onObjApply, onShadowChange, onB
     document.body.appendChild(panel);
 
     panel.querySelector('#cfg-shadow').value = String(settings.shadowMapSize);
+    panel.querySelector('#cfg-grass-shadow').value = settings.grassShadows ? '1' : '0';
 
     panel.querySelector('#cfg-parallax').addEventListener('change', (e) => {
         settings.parallaxStrength = Math.max(0, Number(e.target.value));
@@ -441,6 +457,11 @@ export function initUI(settings, { onGrassApply, onObjApply, onShadowChange, onB
     panel.querySelector('#cfg-apply-obj').addEventListener('click', () => {
         settings.objClusters = Number(panel.querySelector('#cfg-obj-clusters').value);
         onObjApply();
+    });
+
+    panel.querySelector('#cfg-grass-shadow').addEventListener('change', (e) => {
+        settings.grassShadows = e.target.value === '1';
+        onGrassShadowChange(settings.grassShadows);
     });
 
     panel.querySelector('#cfg-apply-grass').addEventListener('click', () => {
@@ -549,6 +570,14 @@ export function initMusicPlayer() {
         .music-btn:hover  { filter: brightness(1.15); }
         .music-btn:active { transform: scale(0.94); }
         #music-play-btn { width: 50px; font-size: 14px; }
+
+        @media (max-width: 520px) {
+            #music-player { min-width: 110px; left: 8px; top: 10px; padding: 1px 4px; gap: 2px; }
+            #music-title { font-size: 9px; max-width: 100px; }
+            #music-artist { font-size: 8px; }
+            .music-btn { width: 30px; font-size: 11px; }
+            #music-play-btn { width: 36px; font-size: 12px; }
+        }
     `;
     document.head.appendChild(style);
 
@@ -844,7 +873,8 @@ export function createBookPanel() {
             position: fixed;
             z-index: 300;
             width: 400px;
-            height: 400px;
+            max-height: 85vh;
+            overflow-y: auto;
             padding: 14px;
             background: rgba(245, 228, 185, 0.97);
             border: 2px solid #7a4a00;
@@ -864,20 +894,29 @@ export function createBookPanel() {
         #skill-card.pinned { pointer-events: all; }
         #skill-card-close {
             position: absolute;
-            top: 5px;
-            right: 6px;
-            background: none;
+            top: 8px;
+            right: 8px;
+            width: 64px;
+            padding: 5px 0;
+            background-image: url('${btnUrl}');
+            background-size: 100% 100%;
+            image-rendering: pixelated;
             border: none;
             cursor: pointer;
-            font-size: 13px;
-            color: #7a4a00;
-            line-height: 1;
-            padding: 2px 4px;
-            display: none;
             font-family: 'Courier New', monospace;
+            font-size: 10px;
+            font-weight: bold;
+            color: #1a0a00;
+            background-color: transparent;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: filter 0.1s;
+            display: none;
+            z-index: 1;
         }
         #skill-card.pinned #skill-card-close { display: block; }
-        #skill-card-close:hover { color: #2a0800; }
+        #skill-card-close:hover  { filter: brightness(1.1); }
+        #skill-card-close:active { transform: scale(0.97); }
         #skill-card-icon { font-size: 32px; text-align: center; margin-bottom: 8px; }
         #skill-card-name {
             font-size: 12px;
@@ -893,6 +932,21 @@ export function createBookPanel() {
         #skill-card-desc p { margin: 0 0 6px; }
         #skill-card-desc ul { margin: 0; padding-left: 14px; }
         #skill-card-desc li { margin: 2px 0; }
+
+        @media (max-width: 600px) {
+            #skill-card {
+                width: calc(100vw - 32px);
+                max-height: calc(100vh - 80px);
+                left: 50%;
+                top: 50%;
+                transform: translateX(-50%) translateY(calc(-50% + 8px)) scale(0.92);
+            }
+            #skill-card.visible,
+            #skill-card.pinned {
+                transform: translateX(-50%) translateY(-50%) scale(1);
+            }
+            #skill-card-close { width: 72px; font-size: 11px; }
+        }
     `;
     document.head.appendChild(style);
 
@@ -908,7 +962,7 @@ export function createBookPanel() {
                     <li><b>+5</b> Patience</li>
                 </ul>` 
         },
-        { id: 'courses', label: "Core Courses", icon: '📚',  x: 16, y: 22,
+        { id: 'courses', label: "Core Courses", icon: '📚',  x: 5, y: 22,
           desc: `<p>Rigorous coursework across multiple disciplines builds a strong academic base.</p><ul><li><b>+10</b> Knowledge</li><li><b>+6</b> Critical Thinking</li></ul>` },
         { id: 'thesis',  label: "Honors Thesis", icon: '📜',  x: 50, y: 22,
           desc: 
@@ -921,7 +975,7 @@ export function createBookPanel() {
             <li>Used various tools to deploy large scale training including Sharcnet/Alliance Cananda’s research infrastructure.</li>
             <li>Designed an interesting yet easily interpretable data visualization pipeline</li>
         </ul>` },
-        { id: 'ta',    label: 'Teaching Assistant', icon: '🧑‍🏫',  x: 84, y: 22,
+        { id: 'ta',    label: 'Teaching Assistant', icon: '🧑‍🏫',  x: 100, y: 22,
           desc: 
           `<p>Guiding others cements mastery. A TA bridges the gap between student and scholar.</p>
                 <ul>
@@ -960,7 +1014,7 @@ export function createBookPanel() {
     const card = document.createElement('div');
     card.id = 'skill-card';
     card.innerHTML = `
-        <button id="skill-card-close">✕</button>
+        <button id="skill-card-close">Close</button>
         <div id="skill-card-icon"></div>
         <div id="skill-card-name"></div>
         <div id="skill-card-desc"></div>
@@ -987,13 +1041,19 @@ export function createBookPanel() {
     };
 
     const positionCard = (nodeEl) => {
+        if (window.innerWidth <= 600) {
+            card.style.left = '';
+            card.style.top  = '';
+            return;
+        }
         const rect   = nodeEl.getBoundingClientRect();
-        const cardW  = 200;
-        const cardH  = 160;
+        const cardW  = card.offsetWidth  || 400;
+        const cardH  = card.offsetHeight || 200;
         const margin = 10;
         let left = rect.right + margin;
-        if (left + cardW > window.innerWidth - margin) left = rect.left - cardW - margin;
-        const top = Math.max(margin, rect.top - cardH);
+        if (left + cardW > window.innerWidth  - margin) left = rect.left - cardW - margin;
+        let top  = Math.max(margin, rect.top);
+        if (top  + cardH > window.innerHeight - margin) top  = window.innerHeight - cardH - margin;
         card.style.left = left + 'px';
         card.style.top  = top  + 'px';
     };
