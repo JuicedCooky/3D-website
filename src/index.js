@@ -399,7 +399,7 @@ initUI(settings, {
     onFgSizeChange: (v) => parallax.setLayerSizes(settings.bgLayerSize, v),
 });
 
-initMusicPlayer();
+const musicPlayer = initMusicPlayer();
 const tooltipSystem = createBuildingTooltipSystem(['school', 'gundam', 'theatre']);
 const bookPanel = createBookPanel();
 const theatreSlideshow = createTheatreSlideshow();
@@ -459,6 +459,9 @@ function animate() {
     _up.copy(playerPos).normalize();
     cam.currentUp.copy(_up);
 
+    cam.disabled = theatre.isActive;
+    if (cam.disabled) cam.isOrbiting = false;
+
     if (!cam.initialised) {
         cam.baseDir.set(0, 0, 1).addScaledVector(_up, -_up.z).normalize();
         cam.initialised = true;
@@ -488,7 +491,8 @@ function animate() {
     if (moving !== isMoving) {
         isMoving = moving;
         doro.action.paused = !moving;
-        if (!moving) { doro.action.time = 0; doro.mixer.update(0); moveTime = 0; }
+        if (moving) musicPlayer.triggerPlay();
+        else { doro.action.time = 0; doro.mixer.update(0); moveTime = 0; }
     }
 
     doro.action.timeScale = WALK_ANIM_SPEED * settings.walkSpeed * sprintMult;

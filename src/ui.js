@@ -716,6 +716,10 @@ export function initMusicPlayer() {
     };
     window.addEventListener('click',   startOnInteraction);
     window.addEventListener('keydown', startOnInteraction);
+
+    return {
+        triggerPlay() { startOnInteraction(); },
+    };
 }
 
 export function createBuildingTooltipSystem(buildingIds) {
@@ -1207,10 +1211,10 @@ export function createBookPanel() {
     });
 
     document.addEventListener('pointerdown', (e) => {
-        if (!_open) return;
+        if (!_open || pinnedNodeId !== null) return;
         if (panel.contains(e.target)) return;
         close();
-    });
+    }, { capture: true });
 
     return {
         open(tooltipScreenX, tooltipScreenY) {

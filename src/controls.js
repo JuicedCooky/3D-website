@@ -39,14 +39,16 @@ if (window.matchMedia('(pointer: coarse)').matches) {
 // ─── Camera orbit / zoom controls ─────────────────────────────────────────────
 // Returns a mutable state object that animate() reads and writes each frame.
 // cam.currentUp must be kept up-to-date by the caller (set via .copy() each frame).
+// Set cam.disabled = true to freeze all camera input (e.g. during theatre zoom).
 export function initCameraControls(domElement, settings, homePitch, initDist) {
     const cam = {
-        baseDir:    new THREE.Vector3(0, 0, 1), // FROM player TOWARD camera, tangent to sphere
-        pitch:      homePitch,
-        dist:       initDist,
-        isOrbiting: false,
+        baseDir:     new THREE.Vector3(0, 0, 1), // FROM player TOWARD camera, tangent to sphere
+        pitch:       homePitch,
+        dist:        initDist,
+        isOrbiting:  false,
+        disabled:    false,
         initialised: false,
-        currentUp:  new THREE.Vector3(0, 1, 0), // sphere normal at player; updated each frame
+        currentUp:   new THREE.Vector3(0, 1, 0), // sphere normal at player; updated each frame
     };
 
     let touchOrbit = null;
@@ -61,6 +63,7 @@ export function initCameraControls(domElement, settings, homePitch, initDist) {
     domElement.addEventListener('contextmenu', (e) => e.preventDefault());
 
     domElement.addEventListener('mousedown', (e) => {
+        if (cam.disabled) return;
         if (e.button === 2) {
             cam.isOrbiting = true;
         }
@@ -73,7 +76,7 @@ export function initCameraControls(domElement, settings, homePitch, initDist) {
     });
 
     window.addEventListener('mousemove', (e) => {
-        if (!cam.isOrbiting) return;
+        if (!cam.isOrbiting || cam.disabled) return;
         const yawQ = new THREE.Quaternion().setFromAxisAngle(cam.currentUp, -e.movementX * settings.panSpeed * 0.001);
         cam.baseDir.applyQuaternion(yawQ);
         cam.baseDir.addScaledVector(cam.currentUp, -cam.baseDir.dot(cam.currentUp)).normalize();
@@ -82,10 +85,12 @@ export function initCameraControls(domElement, settings, homePitch, initDist) {
 
     domElement.addEventListener('wheel', (e) => {
         e.preventDefault();
+        if (cam.disabled) return;
         cam.dist = Math.max(2, Math.min(20, cam.dist + e.deltaY * 0.01));
     }, { passive: false });
 
     domElement.addEventListener('touchstart', (e) => {
+        if (cam.disabled) return;
         e.preventDefault();
         if (e.touches.length >= 2) {
             if (touchOrbit) { touchOrbit = null; cam.isOrbiting = false; }
@@ -100,6 +105,7 @@ export function initCameraControls(domElement, settings, homePitch, initDist) {
     }, { passive: false });
 
     domElement.addEventListener('touchmove', (e) => {
+        if (cam.disabled) return;
         e.preventDefault();
         if (e.touches.length >= 2 && pinchDist !== null) {
             const dist = pinchSep(e.touches);

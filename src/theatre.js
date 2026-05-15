@@ -134,6 +134,8 @@ export function initTheatreZoom({ tooltipSystem, theatreSlideshow, getDoro, came
         rendererEl.style.cursor = '';
         const doro = getDoro();
         if (doro) doro.model.visible = true;
+        const jz = document.getElementById('joystick-zone');
+        if (jz) jz.style.display = '';
     }
 
     function _advance(dir) {
@@ -153,6 +155,8 @@ export function initTheatreZoom({ tooltipSystem, theatreSlideshow, getDoro, came
         const doro = getDoro();
         if (doro) doro.model.visible = false;
         setGameUIVisible(false);
+        const jz = document.getElementById('joystick-zone');
+        if (jz) jz.style.display = 'none';
         theatreSlideshow.show({
             onClose: exit,
             onPrev:  () => _advance(-1),
