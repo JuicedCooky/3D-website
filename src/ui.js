@@ -18,6 +18,20 @@ import border2Url   from '../assets/ui/tooltip_border/UI_TravelBook_SlotCursor01
 import border3Url   from '../assets/ui/tooltip_border/UI_TravelBook_SlotCursor01a_3.png?url';
 import border4Url   from '../assets/ui/tooltip_border/UI_TravelBook_SlotCursor01a_4.png?url';
 
+// Preload all UI images immediately so the browser fetches them in parallel
+// with the 3D assets rather than waiting for each initX() call to inject CSS.
+[
+    bgUrl, btnUrl, inputBgUrl, settingsBtnUrl, settingsIcon,
+    tooltipBgUrl, enterIconUrl, bookCoverUrl,
+    border1Url, border2Url, border3Url, border4Url,
+].forEach(href => {
+    const link = document.createElement('link');
+    link.rel  = 'preload';
+    link.as   = 'image';
+    link.href = href;
+    document.head.appendChild(link);
+});
+
 export function initUI(settings, { onGrassApply, onGrassShadowChange, onObjApply, onShadowChange, onBgSizeChange, onFgSizeChange }) {
     const style = document.createElement('style');
     style.textContent = `
@@ -485,6 +499,12 @@ export function initUI(settings, { onGrassApply, onGrassShadowChange, onObjApply
             panel.classList.toggle('visible');
         }
     });
+
+    document.addEventListener('pointerdown', (e) => {
+        if (!panel.classList.contains('visible')) return;
+        if (panel.contains(e.target) || settingsBtn.contains(e.target)) return;
+        panel.classList.remove('visible');
+    });
 }
 
 export function initMusicPlayer() {
@@ -571,6 +591,48 @@ export function initMusicPlayer() {
         .music-btn:active { transform: scale(0.94); }
         #music-play-btn { width: 50px; font-size: 14px; }
 
+        #music-volume-row {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            width: 100%;
+            padding: 0 2px;
+            box-sizing: border-box;
+        }
+        #music-volume-label {
+            font-size: 8px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            opacity: 0.6;
+            white-space: nowrap;
+        }
+        #music-volume {
+            -webkit-appearance: none;
+            appearance: none;
+            flex: 1;
+            height: 6px;
+            background: rgba(26,10,0,0.25);
+            border-radius: 3px;
+            outline: none;
+            cursor: pointer;
+        }
+        #music-volume::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #1a0a00;
+            cursor: pointer;
+        }
+        #music-volume::-moz-range-thumb {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #1a0a00;
+            border: none;
+            cursor: pointer;
+        }
+
         @media (max-width: 520px) {
             #music-player { min-width: 110px; left: 8px; top: 10px; padding: 1px 4px; gap: 2px; }
             #music-title { font-size: 9px; max-width: 100px; }
@@ -593,6 +655,10 @@ export function initMusicPlayer() {
             <button class="music-btn" id="music-play-btn">&#9654;</button>
             <button class="music-btn" id="music-next-btn">&#9654;&#9654;</button>
         </div>
+        <div id="music-volume-row">
+            <span id="music-volume-label">Vol</span>
+            <input type="range" id="music-volume" min="0" max="1" step="0.02" value="${audio.volume}">
+        </div>
     `;
     document.body.appendChild(player);
 
@@ -601,6 +667,9 @@ export function initMusicPlayer() {
     const playBtn   = player.querySelector('#music-play-btn');
     const prevBtn   = player.querySelector('#music-prev-btn');
     const nextBtn   = player.querySelector('#music-next-btn');
+    const volumeEl  = player.querySelector('#music-volume');
+
+    volumeEl.addEventListener('input', () => { audio.volume = Number(volumeEl.value); });
 
     const loadTrack = (idx) => {
         currentIdx = ((idx % TRACKS.length) + TRACKS.length) % TRACKS.length;
@@ -1032,6 +1101,7 @@ export function createBookPanel() {
         pinnedNodeId = null;
         card.classList.remove('pinned', 'visible');
         document.querySelectorAll('.skill-node.active').forEach(n => n.classList.remove('active'));
+        tree.style.pointerEvents = '';
     };
 
     const populateCard = (skill) => {
@@ -1059,6 +1129,12 @@ export function createBookPanel() {
     };
 
     cardCloseBtn.addEventListener('click', unpinCard);
+
+    document.addEventListener('pointerdown', (e) => {
+        if (!pinnedNodeId) return;
+        if (card.contains(e.target)) return;
+        unpinCard();
+    });
 
     SKILLS.forEach(skill => {
         const node = document.createElement('div');
@@ -1092,6 +1168,7 @@ export function createBookPanel() {
                 node.classList.add('active');
                 card.classList.remove('visible');
                 card.classList.add('pinned');
+                tree.style.pointerEvents = 'none';
             }
         });
 
@@ -1127,6 +1204,12 @@ export function createBookPanel() {
             if (pinnedNodeId !== null) unpinCard();
             else close();
         }
+    });
+
+    document.addEventListener('pointerdown', (e) => {
+        if (!_open) return;
+        if (panel.contains(e.target)) return;
+        close();
     });
 
     return {

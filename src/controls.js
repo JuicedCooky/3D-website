@@ -41,15 +41,12 @@ if (window.matchMedia('(pointer: coarse)').matches) {
 // cam.currentUp must be kept up-to-date by the caller (set via .copy() each frame).
 export function initCameraControls(domElement, settings, homePitch, initDist) {
     const cam = {
-        baseDir:     new THREE.Vector3(0, 0, 1), // FROM player TOWARD camera, tangent to sphere
-        savedBaseDir: new THREE.Vector3(0, 0, 1), // snap-back target
-        pitch:       homePitch,
-        savedPitch:  homePitch,
-        dist:        initDist,
-        isOrbiting:  false,
-        snapBack:    false,
+        baseDir:    new THREE.Vector3(0, 0, 1), // FROM player TOWARD camera, tangent to sphere
+        pitch:      homePitch,
+        dist:       initDist,
+        isOrbiting: false,
         initialised: false,
-        currentUp:   new THREE.Vector3(0, 1, 0), // sphere normal at player; updated each frame
+        currentUp:  new THREE.Vector3(0, 1, 0), // sphere normal at player; updated each frame
     };
 
     let touchOrbit = null;
@@ -66,16 +63,12 @@ export function initCameraControls(domElement, settings, homePitch, initDist) {
     domElement.addEventListener('mousedown', (e) => {
         if (e.button === 2) {
             cam.isOrbiting = true;
-            cam.snapBack = false;
-            cam.savedBaseDir.copy(cam.baseDir);
-            cam.savedPitch = cam.pitch;
         }
     });
 
     window.addEventListener('mouseup', (e) => {
         if (e.button === 2) {
             cam.isOrbiting = false;
-            cam.snapBack = true;
         }
     });
 
@@ -95,7 +88,7 @@ export function initCameraControls(domElement, settings, homePitch, initDist) {
     domElement.addEventListener('touchstart', (e) => {
         e.preventDefault();
         if (e.touches.length >= 2) {
-            if (touchOrbit) { touchOrbit = null; cam.isOrbiting = false; cam.snapBack = true; }
+            if (touchOrbit) { touchOrbit = null; cam.isOrbiting = false; }
             pinchDist = pinchSep(e.touches);
             return;
         }
@@ -103,9 +96,6 @@ export function initCameraControls(domElement, settings, homePitch, initDist) {
         if (!touchOrbit && t.clientY < window.innerHeight * 0.5) {
             touchOrbit = { id: t.identifier, lastX: t.clientX, lastY: t.clientY };
             cam.isOrbiting = true;
-            cam.snapBack = false;
-            cam.savedBaseDir.copy(cam.baseDir);
-            cam.savedPitch = cam.pitch;
         }
     }, { passive: false });
 
@@ -139,7 +129,6 @@ export function initCameraControls(domElement, settings, homePitch, initDist) {
                 if (e.changedTouches[i].identifier !== touchOrbit.id) continue;
                 touchOrbit = null;
                 cam.isOrbiting = false;
-                cam.snapBack = true;
                 break;
             }
         }

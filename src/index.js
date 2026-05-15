@@ -14,11 +14,12 @@ import {
     GUNDAM_NEAR_ARC_DIST,
     THEATRE_NEAR_ARC_DIST,
     gundamState,
-    theatreScreenMesh, theatreWorldQuaternion, advanceTheatreSlide,
     schoolCss3d, gundamCss3d, theatreCss3d,
     schoolTooltipPos, gundamTooltipPos, theatreTooltipPos,
     initUniqueModels, initTooltipCss3d,
 } from './uniqueModels.js';
+
+import { initTheatreZoom } from './theatre.js';
 
 import {
     RANDOM_OBJ_CLUSTERS, RANDOM_OBJ_COLLISION_RADIUS,
@@ -37,7 +38,6 @@ const SPHERE_RADIUS = 16;
 const MOVE_SPEED = 3;
 const TURN_SPEED = 6;
 const HOME_PITCH = 0.4;
-const SNAP_SPEED = 6;
 const WALK_ANIM_SPEED = 4.0;
 const SPRINT_MULTIPLIER = 2.0;
 const CAM_DIST = 10;
@@ -411,27 +411,6 @@ let _currentArcDist       = Infinity;
 let _currentGundamArcDist  = Infinity;
 let _currentTheatreArcDist = Infinity;
 
-// ─── Theatre zoom state ────────────────────────────────────────────────────────
-let theatreZoomActive    = false;
-const _theatreCamTarget  = new THREE.Vector3();
-const _theatreLookAt     = new THREE.Vector3();
-const _theatreScratch    = new THREE.Vector3();
-const _screenNormal      = new THREE.Vector3();
-
-const _gameUIIds = ['ui-settings-btn', 'ui-film-btn', 'music-player'];
-function setGameUIVisible(visible) {
-    _gameUIIds.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.style.display = visible ? '' : 'none';
-    });
-}
-
-function exitTheatreZoom() {
-    theatreZoomActive = false;
-    theatreSlideshow.hide();
-    setGameUIVisible(true);
-    if (doro) doro.model.visible = true;
-}
 
 tooltipSystem.getElement('school').querySelector('.bld-tt-shell').addEventListener('click', (e) => {
     if (!bookPanel.isOpen) bookPanel.open(e.clientX, e.clientY);
@@ -445,30 +424,15 @@ tooltipSystem.getElement('gundam').querySelector('.bld-tt-shell').addEventListen
     gundamState.animPhase = 'playing';
 });
 
-tooltipSystem.getElement('theatre').querySelector('.bld-tt-shell').addEventListener('click', () => {
-    if (theatreZoomActive || !theatreScreenMesh) return;
-    theatreZoomActive = true;
-
-    theatreScreenMesh.getWorldPosition(_theatreScratch);
-    // Derive screen facing from the theatre's known world quaternion (local +Z = forward)
-    _screenNormal.set(1, 0, 0).applyQuaternion(theatreWorldQuaternion).normalize();
-
-    _theatreCamTarget.copy(_theatreScratch).addScaledVector(_screenNormal, 3.5);
-    _theatreLookAt.copy(_theatreScratch);
-
-    if (doro) doro.model.visible = false;
-    setGameUIVisible(false);
-    theatreSlideshow.show({
-        onClose: exitTheatreZoom,
-        onPrev:  () => advanceTheatreSlide(-1),
-        onNext:  () => advanceTheatreSlide(1),
-    });
+const theatre = initTheatreZoom({
+    tooltipSystem,
+    theatreSlideshow,
+    getDoro:    () => doro,
+    camera,
+    rendererEl: renderer.domElement,
 });
 
 window.addEventListener('keydown', (e) => {
-    if (e.code === 'Escape' && theatreZoomActive) { exitTheatreZoom(); return; }
-    if (e.code === 'ArrowLeft'  && theatreZoomActive) { advanceTheatreSlide(-1); return; }
-    if (e.code === 'ArrowRight' && theatreZoomActive) { advanceTheatreSlide(1);  return; }
     if (e.code === 'Enter') {
         if (_currentArcDist < SCHOOL_NEAR_ARC_DIST && !bookPanel.isOpen) {
             const v = schoolTooltipPos.clone().project(camera);
@@ -479,8 +443,8 @@ window.addEventListener('keydown', (e) => {
             if (gundamState && gundamState.animPhase !== 'playing') {
                 tooltipSystem.getElement('gundam').querySelector('.bld-tt-shell').click();
             }
-        } else if (_currentTheatreArcDist < THEATRE_NEAR_ARC_DIST && !theatreZoomActive && theatreScreenMesh) {
-            tooltipSystem.getElement('theatre').querySelector('.bld-tt-shell').click();
+        } else if (_currentTheatreArcDist < THEATRE_NEAR_ARC_DIST && !theatre.isActive) {
+            theatre.enter();
         }
     }
 });
@@ -497,7 +461,6 @@ function animate() {
 
     if (!cam.initialised) {
         cam.baseDir.set(0, 0, 1).addScaledVector(_up, -_up.z).normalize();
-        cam.savedBaseDir.copy(cam.baseDir);
         cam.initialised = true;
     }
 
@@ -507,7 +470,7 @@ function animate() {
     _camRight.crossVectors(_camFwd, _up).normalize();
 
     _moveDir.set(0, 0, 0);
-    if (!theatreZoomActive) {
+    if (!theatre.isActive) {
         if (keys.has('KeyW')) _moveDir.add(_camFwd);
         if (keys.has('KeyS')) _moveDir.sub(_camFwd);
         if (keys.has('KeyA')) _moveDir.sub(_camRight);
@@ -549,14 +512,12 @@ function animate() {
         facingDir.applyQuaternion(_q).normalize();
 
         cam.baseDir.applyQuaternion(_q).normalize();
-        cam.savedBaseDir.applyQuaternion(_q).normalize();
     }
 
     // ── Post-move surface re-projection ──────────────────────────────────────
     _up.copy(playerPos).normalize();
     facingDir.addScaledVector(_up, -facingDir.dot(_up)).normalize();
     cam.baseDir.addScaledVector(_up, -cam.baseDir.dot(_up)).normalize();
-    cam.savedBaseDir.addScaledVector(_up, -cam.savedBaseDir.dot(_up)).normalize();
 
     // ── Building collision ────────────────────────────────────────────────────
     const cosAngle = _up.dot(schoolNormal);
@@ -569,7 +530,6 @@ function animate() {
         _up.copy(playerPos).normalize();
         facingDir.addScaledVector(_up, -facingDir.dot(_up)).normalize();
         cam.baseDir.addScaledVector(_up, -cam.baseDir.dot(_up)).normalize();
-        cam.savedBaseDir.addScaledVector(_up, -cam.savedBaseDir.dot(_up)).normalize();
     }
 
     // ── Physics step ─────────────────────────────────────────────────────────
@@ -587,7 +547,6 @@ function animate() {
             _up.copy(playerPos).normalize();
             facingDir.addScaledVector(_up, -facingDir.dot(_up)).normalize();
             cam.baseDir.addScaledVector(_up, -cam.baseDir.dot(_up)).normalize();
-            cam.savedBaseDir.addScaledVector(_up, -cam.savedBaseDir.dot(_up)).normalize();
 
             if (!po.colliding) {
                 po.body.wakeUp();
@@ -607,15 +566,6 @@ function animate() {
         po.colliding = hit;
     }
 
-    // ── Snap camera back ──────────────────────────────────────────────────────
-    if (cam.snapBack && !cam.isOrbiting) {
-        cam.baseDir.lerp(cam.savedBaseDir, Math.min(1, SNAP_SPEED * delta)).normalize();
-        cam.pitch = THREE.MathUtils.lerp(cam.pitch, cam.savedPitch, Math.min(1, SNAP_SPEED * delta));
-        if (cam.baseDir.dot(cam.savedBaseDir) > 0.9999 && Math.abs(cam.pitch - cam.savedPitch) < 0.001) {
-            cam.snapBack = false;
-        }
-    }
-
     // ── Orient model ──────────────────────────────────────────────────────────
     _right.crossVectors(_up, facingDir).normalize();
     _mat.makeBasis(_right, _up, facingDir);
@@ -626,10 +576,8 @@ function animate() {
     if (gundamState && gundamState.animPhase === 'playing') gundamState.mixer.update(delta);
 
     // ── Camera position ───────────────────────────────────────────────────────
-    if (theatreZoomActive) {
-        camera.position.lerp(_theatreCamTarget, Math.min(1, 4 * delta));
-        camera.up.copy(theatreNormal);
-        camera.lookAt(_theatreLookAt);
+    if (theatre.isActive) {
+        theatre.updateCamera(camera, delta);
     } else {
         _targetCamPos.copy(playerPos)
             .addScaledVector(cam.baseDir, cam.dist * Math.cos(cam.pitch))
@@ -661,7 +609,7 @@ function animate() {
         },
         {
             id: 'theatre',
-            visible: !theatreZoomActive && theatreNormal.dot(camera.position) > 0,
+            visible: !theatre.isActive && theatreNormal.dot(camera.position) > 0,
             isNear:  theatreArcDist < THEATRE_NEAR_ARC_DIST,
         },
     ]);
