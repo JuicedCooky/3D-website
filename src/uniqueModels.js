@@ -4,7 +4,6 @@ import schoolUrl      from '../3d_models/objects/school.glb?url';
 import gundamIdleUrl    from '../3d_models/objects/gundam/rx-78_idle-3.glb?url';
 import gundamStandUpUrl from '../3d_models/objects/gundam/rx-78_stand-up-2.glb?url';
 import theatreUrl from '../3d_models/objects/theatre.glb?url';
-import slide0Url from '../assets/slideshow/Screenshot 2026-05-09 042521.png?url';
 
 // ─── School placement config ───────────────────────────────────────────────────
 export const SCHOOL_THETA            = 0.3;
@@ -60,75 +59,8 @@ export let theatreCss3d = null;
 export let theatreScreenMesh = null;
 export const theatreWorldQuaternion = new THREE.Quaternion();
 
-// ─── Theatre slideshow ─────────────────────────────────────────────────────────
-export const THEATRE_SLIDES = [
-    { label: 'Project 1', bg: '#1a1a2e', accent: '#e94560', imgUrl: slide0Url },
-    { label: 'Project 2', bg: '#0f3460', accent: '#53d8fb' },
-    { label: 'Project 3', bg: '#16213e', accent: '#f5a623' },
-];
-export let theatreSlideIdx = 0;
-let _slideCanvas  = null;
-let _slideCtx     = null;
-let _slideTexture = null;
-
-function _drawSlideFallback(slide, idx) {
-    const w = _slideCanvas.width, h = _slideCanvas.height;
-    _slideCtx.fillStyle = slide.bg;
-    _slideCtx.fillRect(0, 0, w, h);
-    _slideCtx.strokeStyle = 'rgba(255,255,255,0.07)';
-    _slideCtx.lineWidth = 1;
-    for (let x = 0; x < w; x += 80) { _slideCtx.beginPath(); _slideCtx.moveTo(x, 0); _slideCtx.lineTo(x, h); _slideCtx.stroke(); }
-    for (let y = 0; y < h; y += 80) { _slideCtx.beginPath(); _slideCtx.moveTo(0, y); _slideCtx.lineTo(w, y); _slideCtx.stroke(); }
-    _slideCtx.fillStyle = slide.accent;
-    _slideCtx.fillRect(w * 0.1, h * 0.1, w * 0.8, 4);
-    _slideCtx.fillRect(w * 0.1, h * 0.82, w * 0.8, 4);
-    _slideCtx.fillStyle = 'rgba(255,255,255,0.9)';
-    _slideCtx.font = 'bold 56px monospace';
-    _slideCtx.textAlign = 'center';
-    _slideCtx.textBaseline = 'middle';
-    _slideCtx.fillText(slide.label, w / 2, h / 2);
-    _slideCtx.font = '22px monospace';
-    _slideCtx.fillStyle = 'rgba(255,255,255,0.45)';
-    _slideCtx.fillText(`${idx + 1} / ${THEATRE_SLIDES.length}`, w / 2, h * 0.72);
-}
-
-function _drawSlide(idx) {
-    if (!_slideCtx) return;
-    const slide = THEATRE_SLIDES[idx % THEATRE_SLIDES.length];
-    const w = _slideCanvas.width, h = _slideCanvas.height;
-
-    if (slide.imgUrl) {
-        const img = new Image();
-        img.onload = () => {
-            // Clear physical canvas to black first (outside any transform)
-            _slideCtx.fillStyle = '#000';
-            _slideCtx.fillRect(0, 0, w, h);
-            // Draw image with H-flip, contained with margin on all sides
-            const PAD = 16;
-            const scale = Math.min((w - PAD * 2) / img.naturalWidth, (h - PAD * 2) / img.naturalHeight);
-            const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
-            _slideCtx.save();
-            _slideCtx.translate(w, 0);
-            _slideCtx.scale(-1, 1);
-            _slideCtx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
-            _slideCtx.restore();
-            if (_slideTexture) _slideTexture.needsUpdate = true;
-        };
-        img.src = slide.imgUrl;
-    } else {
-        _slideCtx.save();
-        _slideCtx.translate(w, 0);
-        _slideCtx.scale(-1, 1);
-        _drawSlideFallback(slide, idx);
-        _slideCtx.restore();
-        if (_slideTexture) _slideTexture.needsUpdate = true;
-    }
-}
-
-export function advanceTheatreSlide(dir) {
-    theatreSlideIdx = ((theatreSlideIdx + dir) % THEATRE_SLIDES.length + THEATRE_SLIDES.length) % THEATRE_SLIDES.length;
-    _drawSlide(theatreSlideIdx);
-}
+let _onTheatreScreenReady = null;
+export function setTheatreScreenReadyCallback(cb) { _onTheatreScreenReady = cb; }
 
 export function initUniqueModels(scene, loader, SPHERE_RADIUS) {
     cosSchoolGrassExclusion = Math.cos(SCHOOL_GRASS_RADIUS / SPHERE_RADIUS);
@@ -229,29 +161,7 @@ export function initUniqueModels(scene, loader, SPHERE_RADIUS) {
                 uvAttr.needsUpdate = true;
             }
 
-            _slideCanvas        = document.createElement('canvas');
-            _slideCanvas.width  = 1024;
-            _slideCanvas.height = 1024;
-            _slideCtx           = _slideCanvas.getContext('2d');
-            _slideTexture          = new THREE.CanvasTexture(_slideCanvas);
-            _slideTexture.colorSpace = THREE.SRGBColorSpace;
-            _slideTexture.wrapS = THREE.ClampToEdgeWrapping;
-            _slideTexture.wrapT = THREE.ClampToEdgeWrapping;
-            _slideTexture.repeat.set(3.890, 1.570);
-            _slideTexture.offset.set(-0.485, 0.000);
-            _slideTexture.rotation = -1.571;
-            _slideTexture.center.set(0.5, 0.5);
-            _drawSlide(0);
-
-            const applyMap = (mat) => {
-                mat.map               = _slideTexture;
-                mat.emissiveMap       = _slideTexture;
-                mat.emissive          = new THREE.Color(1, 1, 1);
-                mat.emissiveIntensity = 0.6;
-                mat.needsUpdate       = true;
-            };
-            if (Array.isArray(theatreScreenMesh.material)) theatreScreenMesh.material.forEach(applyMap);
-            else applyMap(theatreScreenMesh.material);
+            if (_onTheatreScreenReady) _onTheatreScreenReady(theatreScreenMesh);
         }
 
         scene.add(theatre);
