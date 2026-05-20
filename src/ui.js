@@ -32,7 +32,7 @@ import border4Url   from '../assets/ui/tooltip_border/UI_TravelBook_SlotCursor01
     document.head.appendChild(link);
 });
 
-export function initUI(settings, { onGrassApply, onGrassShadowChange, onObjApply, onShadowChange, onBgSizeChange, onFgSizeChange }) {
+export function initUI(settings, { onGrassApply, onGrassShadowChange, onObjApply, onShadowChange, onBgSizeChange, onFgSizeChange, onAxisToggle }) {
     const style = document.createElement('style');
     style.textContent = `
         #settings-panel {
@@ -219,8 +219,8 @@ export function initUI(settings, { onGrassApply, onGrassShadowChange, onObjApply
 
     const settingsBtn = document.createElement('button');
     settingsBtn.id = 'ui-settings-btn';
-    settingsBtn.title = 'Settings [Tab]';
-    settingsBtn.innerHTML = `<img src="${settingsIcon}" alt=""><span>Settings [tab]</span>`;
+    settingsBtn.title = 'Settings [Esc]';
+    settingsBtn.innerHTML = `<img src="${settingsIcon}" alt=""><span>Settings [esc]</span>`;
     document.body.appendChild(settingsBtn);
 
     // --- Film Effect Button ---
@@ -431,12 +431,22 @@ export function initUI(settings, { onGrassApply, onGrassShadowChange, onObjApply
         </div>
         <button class="cfg-btn" id="cfg-apply-obj">Apply Objects</button>
 
-        <button class="cfg-btn" id="cfg-close">Close  [Tab]</button>
+        <div class="cfg-section">Debug</div>
+        <div class="cfg-row">
+            <label>Lat/Lon Grid</label>
+            <select id="cfg-axis">
+                <option value="0">Off</option>
+                <option value="1">On</option>
+            </select>
+        </div>
+
+        <button class="cfg-btn" id="cfg-close">Close  [Esc]</button>
     `;
     document.body.appendChild(panel);
 
-    panel.querySelector('#cfg-shadow').value = String(settings.shadowMapSize);
+    panel.querySelector('#cfg-shadow').value      = String(settings.shadowMapSize);
     panel.querySelector('#cfg-grass-shadow').value = settings.grassShadows ? '1' : '0';
+    panel.querySelector('#cfg-axis').value         = settings.showAxis      ? '1' : '0';
 
     panel.querySelector('#cfg-parallax').addEventListener('change', (e) => {
         settings.parallaxStrength = Math.max(0, Number(e.target.value));
@@ -478,6 +488,11 @@ export function initUI(settings, { onGrassApply, onGrassShadowChange, onObjApply
         onGrassShadowChange(settings.grassShadows);
     });
 
+    panel.querySelector('#cfg-axis').addEventListener('change', (e) => {
+        settings.showAxis = e.target.value === '1';
+        onAxisToggle(settings.showAxis);
+    });
+
     panel.querySelector('#cfg-apply-grass').addEventListener('click', () => {
         settings.grassCount    = Number(panel.querySelector('#cfg-count').value);
         settings.grassScaleMin = Number(panel.querySelector('#cfg-scale-min').value);
@@ -494,8 +509,9 @@ export function initUI(settings, { onGrassApply, onGrassShadowChange, onObjApply
     });
 
     window.addEventListener('keydown', (e) => {
-        if (e.code === 'Tab') {
-            e.preventDefault();
+        if (e.code === 'Escape') {
+            if (document.getElementById('book-panel')?.style.display === 'flex') return;
+            if (document.getElementById('mini-map-panel')?.classList.contains('visible')) return;
             panel.classList.toggle('visible');
         }
     });
@@ -1241,6 +1257,265 @@ export function createBookPanel() {
         },
         close,
         get isOpen() { return _open; },
+    };
+}
+
+export function createMiniMap(locations, { onTeleport }) {
+    const VW = 400, VH = 200;
+    const TWO_PI = Math.PI * 2;
+    const thetaToX = (theta) => ((((theta % TWO_PI) + TWO_PI) % TWO_PI) / TWO_PI) * VW;
+    const phiToY   = (phi)   => (phi / Math.PI) * VH;
+
+    const style = document.createElement('style');
+    style.textContent = `
+        #mini-map-panel {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 460px;
+            max-width: calc(100vw - 32px);
+            padding: 12px;
+            border: 24px solid transparent;
+            border-image: url('${bgUrl}') 11 fill repeat;
+            image-rendering: pixelated;
+            font-family: 'Courier New', monospace;
+            color: #1a0a00;
+            display: none;
+            z-index: 101;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.7);
+        }
+        #mini-map-panel.visible { display: block; }
+        #mini-map-title {
+            margin: 0 0 10px;
+            text-align: center;
+            font-size: 15px;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            font-weight: bold;
+            text-shadow: 1px 1px 0 rgba(255,255,255,0.35);
+        }
+        #mini-map-svg-wrap {
+            width: 100%;
+            border: 2px solid rgba(26,10,0,0.3);
+            box-sizing: border-box;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        #mini-map-svg { display: block; width: 100%; height: auto; }
+        #mini-map-hint {
+            margin-top: 6px;
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            opacity: 0.6;
+            text-align: center;
+        }
+        #mini-map-close-btn {
+            display: block;
+            width: 100%;
+            padding: 8px 0;
+            margin-top: 8px;
+            background-image: url('${btnUrl}');
+            background-size: 100% 100%;
+            image-rendering: pixelated;
+            border: none;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            font-weight: bold;
+            color: #1a0a00;
+            background-color: transparent;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            transition: filter 0.1s;
+        }
+        #mini-map-close-btn:hover  { filter: brightness(1.1); }
+        #mini-map-close-btn:active { transform: scale(0.97); }
+        #ui-map-btn {
+            position: fixed;
+            top: 150px;
+            right: 16px;
+            width: 210px;
+            height: 54px;
+            z-index: 99;
+            cursor: pointer;
+            background: none;
+            border: 16px solid transparent;
+            border-image: url('${settingsBtnUrl}') 11 fill repeat;
+            image-rendering: pixelated;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 9px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            font-weight: bold;
+            color: #1a0a00;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            transition: filter 0.1s;
+        }
+        #ui-map-btn img { width: 20px; height: 20px; image-rendering: pixelated; display: block; flex-shrink: 0; }
+        #ui-map-btn:hover  { filter: brightness(1.15); }
+        #ui-map-btn:active { transform: scale(0.94); }
+        .map-marker { cursor: pointer; }
+        .map-marker-circle { transition: r 0.12s; }
+        .map-marker:hover .map-marker-circle { r: 10px; }
+        @media (max-width: 520px) {
+            #mini-map-panel { width: calc(100vw - 32px); }
+            #ui-map-btn { width: 160px; height: 44px; font-size: 12px; right: 8px; top: 122px; }
+            #ui-map-btn img { width: 16px; height: 16px; }
+        }
+    `;
+    document.head.appendChild(style);
+
+    // Map toggle button
+    const mapBtn = document.createElement('button');
+    mapBtn.id = 'ui-map-btn';
+    mapBtn.title = 'Map [Tab]';
+    mapBtn.innerHTML = `<img src="${settingsIcon}" alt=""><span>Map [tab]</span>`;
+    document.body.appendChild(mapBtn);
+
+    const panel = document.createElement('div');
+    panel.id = 'mini-map-panel';
+
+    const titleEl = document.createElement('div');
+    titleEl.id = 'mini-map-title';
+    titleEl.textContent = 'World Map';
+    panel.appendChild(titleEl);
+
+    const wrap = document.createElement('div');
+    wrap.id = 'mini-map-svg-wrap';
+
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.id = 'mini-map-svg';
+    svg.setAttribute('viewBox', `0 0 ${VW} ${VH}`);
+    svg.setAttribute('xmlns', NS);
+
+    // Background
+    const bgRect = document.createElementNS(NS, 'rect');
+    bgRect.setAttribute('width', VW); bgRect.setAttribute('height', VH);
+    bgRect.setAttribute('fill', '#569c56');
+    svg.appendChild(bgRect);
+
+    // Vertical grid lines every 90°
+    [1, 2, 3].forEach(i => {
+        const line = document.createElementNS(NS, 'line');
+        line.setAttribute('x1', VW * i / 4); line.setAttribute('y1', 0);
+        line.setAttribute('x2', VW * i / 4); line.setAttribute('y2', VH);
+        line.setAttribute('stroke', 'rgba(100,160,200,0.12)');
+        line.setAttribute('stroke-width', '0.5');
+        svg.appendChild(line);
+    });
+
+    // Equator
+    const equator = document.createElementNS(NS, 'line');
+    equator.setAttribute('x1', 0); equator.setAttribute('y1', VH / 2);
+    equator.setAttribute('x2', VW); equator.setAttribute('y2', VH / 2);
+    equator.setAttribute('stroke', 'rgba(100,160,200,0.2)');
+    equator.setAttribute('stroke-width', '0.8');
+    svg.appendChild(equator);
+
+    // Location markers
+    locations.forEach(loc => {
+        const x = thetaToX(loc.theta);
+        const y = phiToY(loc.phi);
+
+        const g = document.createElementNS(NS, 'g');
+        g.setAttribute('class', 'map-marker');
+        g.setAttribute('transform', `translate(${x.toFixed(1)},${y.toFixed(1)})`);
+
+        const circle = document.createElementNS(NS, 'circle');
+        circle.setAttribute('class', 'map-marker-circle');
+        circle.setAttribute('r', '7');
+        circle.setAttribute('fill', 'rgba(200,155,50,0.9)');
+        circle.setAttribute('stroke', 'rgba(255,255,255,0.7)');
+        circle.setAttribute('stroke-width', '1.5');
+
+        const icon = document.createElementNS(NS, 'text');
+        icon.setAttribute('y', '4'); icon.setAttribute('text-anchor', 'middle');
+        icon.setAttribute('font-size', '9'); icon.setAttribute('fill', '#fff');
+        icon.textContent = loc.icon;
+
+        const label = document.createElementNS(NS, 'text');
+        label.setAttribute('y', '19'); label.setAttribute('text-anchor', 'middle');
+        label.setAttribute('font-family', 'Courier New, monospace');
+        label.setAttribute('font-size', '7'); label.setAttribute('fill', '#ffe8b0');
+        label.setAttribute('font-weight', 'bold');
+        label.textContent = loc.label.toUpperCase();
+
+        g.appendChild(circle);
+        g.appendChild(icon);
+        g.appendChild(label);
+        g.addEventListener('click', () => { onTeleport(loc.theta, loc.phi); hide(); });
+        svg.appendChild(g);
+    });
+
+    // Player marker (rendered last → always on top)
+    const playerDot = document.createElementNS(NS, 'circle');
+    playerDot.setAttribute('r', '5');
+    playerDot.setAttribute('fill', '#ff4400');
+    playerDot.setAttribute('stroke', '#fff');
+    playerDot.setAttribute('stroke-width', '1.5');
+
+    const playerLbl = document.createElementNS(NS, 'text');
+    playerLbl.setAttribute('y', '-8'); playerLbl.setAttribute('text-anchor', 'middle');
+    playerLbl.setAttribute('font-family', 'Courier New, monospace');
+    playerLbl.setAttribute('font-size', '7'); playerLbl.setAttribute('fill', '#ff8866');
+    playerLbl.setAttribute('font-weight', 'bold');
+    playerLbl.textContent = 'YOU';
+
+    const playerG = document.createElementNS(NS, 'g');
+    playerG.appendChild(playerDot);
+    playerG.appendChild(playerLbl);
+    svg.appendChild(playerG);
+
+    wrap.appendChild(svg);
+    panel.appendChild(wrap);
+
+    const hint = document.createElement('div');
+    hint.id = 'mini-map-hint';
+    hint.textContent = 'Click a location to teleport  •  [Tab] to close';
+    panel.appendChild(hint);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.id = 'mini-map-close-btn';
+    closeBtn.textContent = 'Close  [Tab]';
+    panel.appendChild(closeBtn);
+
+    document.body.appendChild(panel);
+
+    let _open = false;
+    const show = () => { _open = true;  panel.classList.add('visible'); };
+    const hide = () => { _open = false; panel.classList.remove('visible'); };
+
+    closeBtn.addEventListener('click', hide);
+    mapBtn.addEventListener('click', () => { _open ? hide() : show(); });
+
+    window.addEventListener('keydown', (e) => {
+        if (e.code === 'Escape' && _open) hide();
+    });
+
+    document.addEventListener('pointerdown', (e) => {
+        if (!_open || panel.contains(e.target) || mapBtn.contains(e.target)) return;
+        hide();
+    });
+
+    return {
+        show,
+        hide,
+        toggle() { _open ? hide() : show(); },
+        get isOpen() { return _open; },
+        update(playerNorm) {
+            const phi   = Math.acos(Math.max(-1, Math.min(1, playerNorm.y)));
+            const theta = Math.atan2(playerNorm.z, playerNorm.x);
+            const x = thetaToX(theta);
+            const y = phiToY(phi);
+            playerG.setAttribute('transform', `translate(${x.toFixed(1)},${y.toFixed(1)})`);
+        },
     };
 }
 

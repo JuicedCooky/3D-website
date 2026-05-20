@@ -13,9 +13,17 @@ import {
     SCHOOL_COLLISION_RADIUS, SCHOOL_NEAR_ARC_DIST,
     GUNDAM_NEAR_ARC_DIST,
     THEATRE_NEAR_ARC_DIST,
+    SCHOOL_THETA, SCHOOL_PHI,
+    GUNDAM_THETA, GUNDAM_PHI,
+    THEATRE_THETA, THEATRE_PHI,
+    GITHUB_THETA, GITHUB_PHI,
+    GITHUB_COLLISION_RADIUS, GITHUB_SPIN_SPEED, GITHUB_HEIGHT, GITHUB_NEAR_ARC_DIST,
+    githubNormal, githubModel,
+    UI_HEIGHT,
     gundamState,
-    schoolCss3d, gundamCss3d, theatreCss3d,
+    schoolCss3d, gundamCss3d, theatreCss3d, githubCss3d,
     schoolTooltipPos, gundamTooltipPos, theatreTooltipPos,
+    setGithubLoadedCallback,
     initUniqueModels, initTooltipCss3d,
 } from './uniqueModels.js';
 
@@ -29,7 +37,7 @@ import {
     initScatter,
 } from './scatter.js';
 
-import { initUI, createBuildingTooltipSystem, createBookPanel, initMusicPlayer, createTheatreSlideshow } from './ui.js';
+import { initUI, createBuildingTooltipSystem, createBookPanel, initMusicPlayer, createTheatreSlideshow, createMiniMap } from './ui.js';
 import { initPhysics, PHYS_IMPULSE_STR } from './physics.js';
 
 
@@ -63,6 +71,7 @@ const settings = {
     parallaxStrength: 2,
     bgLayerSize:      100,
     fgLayerSize:      100,
+    showAxis:         false,
 };
 
 const scene = new THREE.Scene();
@@ -380,6 +389,134 @@ requestAnimationFrame(onResize);
 
 const clock = new THREE.Clock();
 
+// ─── Lat/Lon debug grid ────────────────────────────────────────────────────────
+function createWorldGrid() {
+    const group = new THREE.Group();
+    const R   = SPHERE_RADIUS + 0.08;
+    const SEG = 96;
+    const D   = Math.PI / 180;
+
+    const matDim     = new THREE.LineBasicMaterial({ color: 0xffffff, opacity: 0.45, transparent: true });
+    const matRef     = new THREE.LineBasicMaterial({ color: 0xff4422, opacity: 0.85, transparent: true });
+    const matAxis    = new THREE.LineBasicMaterial({ color: 0x44ff88, opacity: 0.9,  transparent: true });
+
+    // Latitude circles every 30° (-60 to +60; poles are just the axis endpoints)
+    for (let lat = -60; lat <= 60; lat += 30) {
+        const phi = (90 - lat) * D;
+        const y   = R * Math.cos(phi);
+        const r   = R * Math.sin(phi);
+        const pts = [];
+        for (let i = 0; i <= SEG; i++) {
+            const t = (i / SEG) * Math.PI * 2;
+            pts.push(new THREE.Vector3(r * Math.cos(t), y, r * Math.sin(t)));
+        }
+        group.add(new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(pts),
+            lat === 0 ? matRef : matDim,
+        ));
+    }
+
+    // Longitude lines every 30° (full pole-to-pole arcs)
+    for (let lon = 0; lon < 360; lon += 30) {
+        const theta = lon * D;
+        const pts   = [];
+        for (let i = 0; i <= SEG; i++) {
+            const phi = (i / SEG) * Math.PI;
+            pts.push(new THREE.Vector3(
+                R * Math.sin(phi) * Math.cos(theta),
+                R * Math.cos(phi),
+                R * Math.sin(phi) * Math.sin(theta),
+            ));
+        }
+        group.add(new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(pts),
+            lon === 0 ? matRef : matDim,
+        ));
+    }
+
+    // Polar axis (Y+  = north pole, Y− = south pole)
+    group.add(new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(0, -R * 1.15, 0),
+            new THREE.Vector3(0,  R * 1.15, 0),
+        ]),
+        matAxis,
+    ));
+
+    // Marker dot at lon=0, lat=0 (where the two red lines cross on the equator)
+    const dotGeo = new THREE.SphereGeometry(0.18, 8, 8);
+    const dotMat = new THREE.MeshBasicMaterial({ color: 0xff4422 });
+    const dot    = new THREE.Mesh(dotGeo, dotMat);
+    dot.position.set(R, 0, 0); // theta=0, phi=π/2  →  (R, 0, 0)
+    group.add(dot);
+
+    // Invisible sphere used only as a raycasting target
+    const hitSphere = new THREE.Mesh(
+        new THREE.SphereGeometry(R, 32, 32),
+        new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+    );
+    scene.add(hitSphere);
+
+    // Floating tooltip DOM element
+    const tooltip = document.createElement('div');
+    Object.assign(tooltip.style, {
+        position:      'fixed',
+        pointerEvents: 'none',
+        background:    'rgba(10,20,40,0.88)',
+        color:         '#ffe8b0',
+        fontFamily:    'Courier New, monospace',
+        fontSize:      '12px',
+        fontWeight:    'bold',
+        padding:       '4px 10px',
+        borderRadius:  '2px',
+        border:        '1px solid rgba(255,200,80,0.4)',
+        zIndex:        '202',
+        display:       'none',
+        textTransform: 'uppercase',
+        letterSpacing: '1px',
+        whiteSpace:    'nowrap',
+    });
+    document.body.appendChild(tooltip);
+
+    group.visible = false;
+    scene.add(group);
+    return { group, hitSphere, tooltip };
+}
+const { group: worldGrid, hitSphere: _gridHitSphere, tooltip: _gridTooltip } = createWorldGrid();
+
+// Raycaster for lat/lon hover (only active when grid is visible)
+{
+    const rc     = new THREE.Raycaster();
+    const mouse  = new THREE.Vector2();
+    const RAD    = 180 / Math.PI;
+
+    window.addEventListener('mousemove', (e) => {
+        if (!settings.showAxis) { _gridTooltip.style.display = 'none'; return; }
+
+        mouse.x =  (e.clientX / window.innerWidth)  * 2 - 1;
+        mouse.y = -((e.clientY / window.innerHeight) * 2 - 1);
+
+        rc.setFromCamera(mouse, camera);
+        const hits = rc.intersectObject(_gridHitSphere);
+
+        if (hits.length > 0) {
+            const n   = hits[0].point.clone().normalize();
+            const lat = 90 - Math.acos(Math.max(-1, Math.min(1, n.y))) * RAD;
+            let   lon = Math.atan2(n.z, n.x) * RAD;
+            if (lon < 0) lon += 360;
+
+            _gridTooltip.textContent  = `Lat: ${lat.toFixed(1)}°  Lon: ${lon.toFixed(1)}°`;
+            _gridTooltip.style.display = 'block';
+            _gridTooltip.style.left    = (e.clientX + 16) + 'px';
+            _gridTooltip.style.top     = (e.clientY - 12) + 'px';
+        } else {
+            _gridTooltip.style.display = 'none';
+        }
+    });
+
+    window.addEventListener('mouseleave', () => { _gridTooltip.style.display = 'none'; });
+}
+
 initUI(settings, {
     onGrassApply: spawnGrass,
     onGrassShadowChange: (enabled) => {
@@ -395,21 +532,74 @@ initUI(settings, {
             if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
         }
     },
-    onBgSizeChange: (v) => parallax.setLayerSizes(v, settings.fgLayerSize),
-    onFgSizeChange: (v) => parallax.setLayerSizes(settings.bgLayerSize, v),
+    onBgSizeChange:  (v)    => parallax.setLayerSizes(v, settings.fgLayerSize),
+    onFgSizeChange:  (v)    => parallax.setLayerSizes(settings.bgLayerSize, v),
+    onAxisToggle: (show) => {
+        worldGrid.visible = show;
+        if (!show) _gridTooltip.style.display = 'none';
+    },
 });
 
 const musicPlayer = initMusicPlayer();
-const tooltipSystem = createBuildingTooltipSystem(['school', 'gundam', 'theatre']);
+const tooltipSystem = createBuildingTooltipSystem(['school', 'gundam', 'theatre', 'github']);
 const bookPanel = createBookPanel();
 const theatreSlideshow = createTheatreSlideshow();
+
+const miniMap = createMiniMap([
+    { id: 'school',  label: 'School',  icon: '🏫', theta: SCHOOL_THETA,  phi: SCHOOL_PHI  },
+    { id: 'gundam',  label: 'Gundam',  icon: '🤖', theta: GUNDAM_THETA,  phi: GUNDAM_PHI  },
+    { id: 'theatre', label: 'Theatre', icon: '🎭', theta: THEATRE_THETA, phi: THEATRE_PHI },
+    { id: 'github',  label: 'GitHub',  icon: '🐙', theta: GITHUB_THETA,  phi: GITHUB_PHI  },
+], {
+    onTeleport(theta, phi) {
+        const sinPhi = Math.sin(phi);
+        playerPos.set(
+            sinPhi * Math.cos(theta) * SPHERE_RADIUS,
+            Math.cos(phi)            * SPHERE_RADIUS,
+            sinPhi * Math.sin(theta) * SPHERE_RADIUS,
+        );
+        const up = playerPos.clone().normalize();
+        const ref = Math.abs(up.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+        facingDir.crossVectors(ref, up).normalize();
+        cam.baseDir.crossVectors(up, facingDir).normalize();
+    },
+});
+
+window.addEventListener('keydown', (e) => {
+    if (e.code === 'Tab') {
+        e.preventDefault();
+        miniMap.toggle();
+    }
+});
 
 const cssScene = new THREE.Scene();
 initTooltipCss3d(tooltipSystem, cssScene);
 
-let _currentArcDist       = Infinity;
+let _currentArcDist        = Infinity;
 let _currentGundamArcDist  = Infinity;
 let _currentTheatreArcDist = Infinity;
+let _currentGithubArcDist  = Infinity;
+
+// Tracks github body's current surface normal (updated after physics step)
+const _githubCurrentNormal = githubNormal.clone();
+
+let githubPhysBody  = null;
+let githubColliding = false;
+let githubSpinning  = true;
+
+setGithubLoadedCallback(() => {
+    const gp = githubNormal.clone().multiplyScalar(SPHERE_RADIUS + GITHUB_HEIGHT);
+    githubPhysBody = new CANNON.Body({
+        mass: 1,
+        shape: new CANNON.Sphere(GITHUB_COLLISION_RADIUS * 0.65),
+        material: objectMaterial,
+        linearDamping:  0.4,
+        angularDamping: 0.8,
+    });
+    githubPhysBody.position.set(gp.x, gp.y, gp.z);
+    physicsWorld.addBody(githubPhysBody);
+    githubPhysBody.sleep();
+});
 
 
 tooltipSystem.getElement('school').querySelector('.bld-tt-shell').addEventListener('click', (e) => {
@@ -422,6 +612,10 @@ tooltipSystem.getElement('gundam').querySelector('.bld-tt-shell').addEventListen
     gundamState.standUpModel.visible = true;
     gundamState.standUpAction.reset().play();
     gundamState.animPhase = 'playing';
+});
+
+tooltipSystem.getElement('github').querySelector('.bld-tt-shell').addEventListener('click', () => {
+    window.open('https://github.com/JuicedCooky', '_blank', 'noopener,noreferrer');
 });
 
 const theatre = initTheatreZoom({
@@ -536,6 +730,29 @@ function animate() {
         cam.baseDir.addScaledVector(_up, -cam.baseDir.dot(_up)).normalize();
     }
 
+    // ── GitHub collision ──────────────────────────────────────────────────────
+    const githubArcDist = Math.acos(Math.max(-1, Math.min(1, _up.dot(_githubCurrentNormal)))) * SPHERE_RADIUS;
+    _currentGithubArcDist = githubArcDist;
+    const githubHit = githubArcDist < GITHUB_COLLISION_RADIUS && githubArcDist > 0.0001;
+    if (githubHit) {
+        _rotAxis.crossVectors(_githubCurrentNormal, _up).normalize();
+        _q.setFromAxisAngle(_rotAxis, GITHUB_COLLISION_RADIUS / SPHERE_RADIUS);
+        playerPos.copy(_githubCurrentNormal).multiplyScalar(SPHERE_RADIUS).applyQuaternion(_q).setLength(SPHERE_RADIUS);
+        _up.copy(playerPos).normalize();
+        facingDir.addScaledVector(_up, -facingDir.dot(_up)).normalize();
+        cam.baseDir.addScaledVector(_up, -cam.baseDir.dot(_up)).normalize();
+    }
+
+    // ── Github physics – apply gravity before world step ─────────────────────
+    if (githubPhysBody && githubPhysBody.sleepState < 2) {
+        const gp = githubPhysBody.position;
+        const gl = gp.length();
+        if (gl > 0.001) {
+            const gs = -githubPhysBody.mass * 20 / gl;
+            githubPhysBody.force.set(gp.x * gs, gp.y * gs, gp.z * gs);
+        }
+    }
+
     // ── Physics step ─────────────────────────────────────────────────────────
     stepPhysics(delta, physicsObjects);
 
@@ -570,6 +787,43 @@ function animate() {
         po.colliding = hit;
     }
 
+    // ── Github post-step: ground clamp, position sync, collision impulse ─────
+    if (githubPhysBody) {
+        if (githubPhysBody.sleepState !== 2) {
+            const gp  = githubPhysBody.position;
+            const gd  = SPHERE_RADIUS;
+            const gl  = gp.length();
+            if (gl < gd && gl > 0.001) {
+                const sc = gd / gl;
+                gp.x *= sc; gp.y *= sc; gp.z *= sc;
+                const nx = gp.x / gd, ny = gp.y / gd, nz = gp.z / gd;
+                const v  = githubPhysBody.velocity;
+                const vn = v.x*nx + v.y*ny + v.z*nz;
+                if (vn < 0) { v.x -= vn*nx; v.y -= vn*ny; v.z -= vn*nz; }
+            }
+            const gl2 = gp.length();
+            if (gl2 > 0.001) _githubCurrentNormal.set(gp.x/gl2, gp.y/gl2, gp.z/gl2);
+            if (githubModel) githubModel.position.set(gp.x, gp.y, gp.z);
+        }
+
+        if (githubHit && !githubColliding && githubPhysBody) {
+            githubSpinning = false;
+            githubPhysBody.wakeUp();
+            const objN = _githubCurrentNormal;
+            const dx = objN.x - _up.x, dy = objN.y - _up.y, dz = objN.z - _up.z;
+            const rc = dx*objN.x + dy*objN.y + dz*objN.z;
+            let tx = dx - objN.x*rc, ty = dy - objN.y*rc, tz = dz - objN.z*rc;
+            const tl = Math.sqrt(tx*tx + ty*ty + tz*tz);
+            if (tl > 0.001) { tx /= tl; ty /= tl; tz /= tl; }
+            githubPhysBody.applyImpulse(new CANNON.Vec3(
+                (tx * 0.7 + objN.x * 0.4) * PHYS_IMPULSE_STR,
+                (ty * 0.7 + objN.y * 0.4) * PHYS_IMPULSE_STR,
+                (tz * 0.7 + objN.z * 0.4) * PHYS_IMPULSE_STR,
+            ));
+        }
+        githubColliding = githubHit;
+    }
+
     // ── Orient model ──────────────────────────────────────────────────────────
     _right.crossVectors(_up, facingDir).normalize();
     _mat.makeBasis(_right, _up, facingDir);
@@ -578,6 +832,12 @@ function animate() {
 
     doro.mixer.update(delta);
     if (gundamState && gundamState.animPhase === 'playing') gundamState.mixer.update(delta);
+
+    // ── GitHub spin — stops permanently on first player collision
+    if (githubModel && githubSpinning) {
+        _q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), GITHUB_SPIN_SPEED * delta);
+        githubModel.quaternion.multiply(_q).normalize();
+    }
 
     // ── Camera position ───────────────────────────────────────────────────────
     if (theatre.isActive) {
@@ -600,6 +860,21 @@ function animate() {
     schoolCss3d.quaternion.copy(camera.quaternion);
     gundamCss3d.quaternion.copy(camera.quaternion);
     theatreCss3d.quaternion.copy(camera.quaternion);
+    if (githubCss3d) {
+        githubCss3d.quaternion.copy(camera.quaternion);
+        // Follow physics body if active, otherwise stay at static tooltip pos
+        if (githubPhysBody) {
+            const gp  = githubPhysBody.position;
+            const gl  = Math.sqrt(gp.x*gp.x + gp.y*gp.y + gp.z*gp.z);
+            if (gl > 0.001) {
+                githubCss3d.position.set(
+                    gp.x/gl * (gl + UI_HEIGHT),
+                    gp.y/gl * (gl + UI_HEIGHT),
+                    gp.z/gl * (gl + UI_HEIGHT),
+                );
+            }
+        }
+    }
     tooltipSystem.update([
         {
             id: 'school',
@@ -616,9 +891,15 @@ function animate() {
             visible: !theatre.isActive && theatreNormal.dot(camera.position) > 0,
             isNear:  theatreArcDist < THEATRE_NEAR_ARC_DIST,
         },
+        {
+            id: 'github',
+            visible: _githubCurrentNormal.dot(camera.position) > 0,
+            isNear:  _currentGithubArcDist < GITHUB_NEAR_ARC_DIST,
+        },
     ]);
 
     parallax.update(camera, settings.parallaxStrength);
+    if (miniMap.isOpen) miniMap.update(_up);
     renderer.render(scene, camera);
     cssRenderer.render(cssScene, camera);
 }
