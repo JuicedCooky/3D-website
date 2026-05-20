@@ -512,6 +512,7 @@ export function initUI(settings, { onGrassApply, onGrassShadowChange, onObjApply
         if (e.code === 'Escape') {
             if (document.getElementById('book-panel')?.style.display === 'flex') return;
             if (document.getElementById('mini-map-panel')?.classList.contains('visible')) return;
+            if (document.getElementById('theatre-overlay')?.classList.contains('active')) return;
             panel.classList.toggle('visible');
         }
     });
@@ -1334,8 +1335,8 @@ export function createMiniMap(locations, { onTeleport }) {
         #mini-map-close-btn:active { transform: scale(0.97); }
         #ui-map-btn {
             position: fixed;
-            top: 150px;
-            right: 16px;
+            top: 130px;
+            left: 16px;
             width: 210px;
             height: 54px;
             z-index: 99;
@@ -1365,7 +1366,7 @@ export function createMiniMap(locations, { onTeleport }) {
         .map-marker:hover .map-marker-circle { r: 10px; }
         @media (max-width: 520px) {
             #mini-map-panel { width: calc(100vw - 32px); }
-            #ui-map-btn { width: 160px; height: 44px; font-size: 12px; right: 8px; top: 122px; }
+            #ui-map-btn { width: 160px; height: 44px; font-size: 12px; left: 8px; top: 100px; }
             #ui-map-btn img { width: 16px; height: 16px; }
         }
     `;

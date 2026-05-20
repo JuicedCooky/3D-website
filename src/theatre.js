@@ -153,7 +153,7 @@ setTheatreScreenReadyCallback((screenMesh) => {
     else applyMap(screenMesh.material);
 });
 
-const _gameUIIds = ['ui-settings-btn', 'ui-film-btn', 'music-player'];
+const _gameUIIds = ['ui-settings-btn', 'ui-film-btn', 'music-player', 'ui-map-btn'];
 
 function setGameUIVisible(visible) {
     _gameUIIds.forEach(id => {
@@ -338,6 +338,7 @@ export function initTheatreZoom({ tooltipSystem, theatreSlideshow, getDoro, came
         const doro = getDoro();
         if (doro) doro.model.visible = false;
         setGameUIVisible(false);
+        document.getElementById('mini-map-panel')?.classList.remove('visible');
         const jz = document.getElementById('joystick-zone');
         if (jz) jz.style.display = 'none';
         theatreSlideshow.show({
@@ -408,7 +409,7 @@ export function initTheatreZoom({ tooltipSystem, theatreSlideshow, getDoro, came
         .addEventListener('click', enter);
 
     window.addEventListener('keydown', (e) => {
-        if (e.code === 'Escape'     && _active) { exit();       return; }
+        if (e.code === 'Escape'     && _active) { exit(); return; }
         if (e.code === 'ArrowLeft'  && _active) { _advance(-1); return; }
         if (e.code === 'ArrowRight' && _active) { _advance(1);  return; }
     });

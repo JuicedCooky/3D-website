@@ -5,6 +5,8 @@ import nipplejs from 'nipplejs';
 export const keys = new Set();
 window.addEventListener('keydown', (e) => keys.add(e.code));
 window.addEventListener('keyup',   (e) => keys.delete(e.code));
+window.addEventListener('blur',    ()  => keys.clear());
+document.addEventListener('visibilitychange', () => { if (document.hidden) keys.clear(); });
 
 // ─── Virtual joystick (touch devices only) ────────────────────────────────────
 export const joystick = { x: 0, y: 0 };
