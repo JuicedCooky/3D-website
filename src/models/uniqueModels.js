@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import { CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRenderer.js';
-import schoolUrl      from '../3d_models/objects/school.glb?url';
-import gundamIdleUrl    from '../3d_models/objects/gundam/rx-78_idle-3.glb?url';
-import gundamStandUpUrl from '../3d_models/objects/gundam/rx-78_stand-up-2.glb?url';
-import theatreUrl from '../3d_models/objects/theatre.glb?url';
-import githubUrl  from '../3d_models/objects/technologies/github.glb?url';
+import schoolUrl      from '../../3d_models/objects/school.glb?url';
+import gundamIdleUrl    from '../../3d_models/objects/gundam/rx-78_idle-3.glb?url';
+import gundamStandUpUrl from '../../3d_models/objects/gundam/rx-78_stand-up-2.glb?url';
+import theatreUrl from '../../3d_models/objects/theatre.glb?url';
+import githubUrl   from '../../3d_models/objects/links/github.glb?url';
+import linkedinUrl from '../../3d_models/objects/links/linkedin.glb?url';
 
 const DEG = Math.PI / 180; // degrees → radians
 
@@ -47,6 +48,20 @@ export const GITHUB_THETA = GITHUB_LON        * DEG;
 export const GITHUB_PHI   = (90 - GITHUB_LAT) * DEG;
 export const GITHUB_YAW   = GITHUB_YAW_DEG    * DEG;
 
+// ─── LinkedIn placement config ─────────────────────────────────────────────────
+export const LINKEDIN_LON              = 162.;
+export const LINKEDIN_LAT              =  22.;
+export const LINKEDIN_YAW_DEG          =   0.0;
+export const LINKEDIN_SCALE            =   1.5;
+export const LINKEDIN_HEIGHT           =   1.5;
+export const LINKEDIN_COLLISION_RADIUS =   1.4;
+export const LINKEDIN_SPIN_SPEED       =   1.5;
+export const LINKEDIN_NEAR_ARC_DIST    =   3.5;
+// derived
+export const LINKEDIN_THETA = LINKEDIN_LON        * DEG;
+export const LINKEDIN_PHI   = (90 - LINKEDIN_LAT) * DEG;
+export const LINKEDIN_YAW   = LINKEDIN_YAW_DEG    * DEG;
+
 // ─── Theatre placement config ──────────────────────────────────────────────────
 export const THEATRE_LON              = 200.5; // longitude (180–360 = western hemisphere)
 export const THEATRE_LAT              =  52.8; // latitude
@@ -77,6 +92,12 @@ export const githubNormal = new THREE.Vector3(
     Math.sin(GITHUB_PHI) * Math.sin(GITHUB_THETA)
 ).normalize();
 
+export const linkedinNormal = new THREE.Vector3(
+    Math.sin(LINKEDIN_PHI) * Math.cos(LINKEDIN_THETA),
+    Math.cos(LINKEDIN_PHI),
+    Math.sin(LINKEDIN_PHI) * Math.sin(LINKEDIN_THETA)
+).normalize();
+
 export const theatreNormal = new THREE.Vector3(
     Math.sin(THEATRE_PHI) * Math.cos(THEATRE_THETA),
     Math.cos(THEATRE_PHI),
@@ -84,16 +105,19 @@ export const theatreNormal = new THREE.Vector3(
 ).normalize();
 
 export let cosSchoolGrassExclusion = 0;
-export let schoolTooltipPos  = new THREE.Vector3();
-export let gundamTooltipPos  = new THREE.Vector3();
-export let theatreTooltipPos = new THREE.Vector3();
-export let githubTooltipPos  = new THREE.Vector3();
-export let githubModel  = null;
-export let gundamState  = null;
-export let schoolCss3d  = null;
-export let gundamCss3d  = null;
-export let theatreCss3d = null;
-export let githubCss3d  = null;
+export let schoolTooltipPos   = new THREE.Vector3();
+export let gundamTooltipPos   = new THREE.Vector3();
+export let theatreTooltipPos  = new THREE.Vector3();
+export let githubTooltipPos   = new THREE.Vector3();
+export let linkedinTooltipPos = new THREE.Vector3();
+export let githubModel   = null;
+export let linkedinModel = null;
+export let gundamState   = null;
+export let schoolCss3d   = null;
+export let gundamCss3d   = null;
+export let theatreCss3d  = null;
+export let githubCss3d   = null;
+export let linkedinCss3d = null;
 export let theatreScreenMesh = null;
 export const theatreWorldQuaternion = new THREE.Quaternion();
 
@@ -103,12 +127,36 @@ export function setTheatreScreenReadyCallback(cb) { _onTheatreScreenReady = cb; 
 let _onGithubLoaded = null;
 export function setGithubLoadedCallback(cb) { _onGithubLoaded = cb; }
 
+let _onLinkedinLoaded = null;
+export function setLinkedinLoadedCallback(cb) { _onLinkedinLoaded = cb; }
+
+function loadLinkObject(scene, loader, SPHERE_RADIUS, { url, scale, height, normal, yaw, name }, onLoaded) {
+    loader.load(url, (gltf) => {
+        const model  = gltf.scene;
+        const bbox   = new THREE.Box3().setFromObject(model);
+        const center = new THREE.Vector3();
+        bbox.getCenter(center);
+        model.scale.setScalar(scale);
+        model.position.sub(center.multiplyScalar(scale));
+        model.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+        const wrapper = new THREE.Group();
+        const alignQ  = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
+        const yawQ    = new THREE.Quaternion().setFromAxisAngle(normal, yaw);
+        wrapper.quaternion.copy(yawQ).multiply(alignQ);
+        wrapper.position.copy(normal).multiplyScalar(SPHERE_RADIUS + height);
+        wrapper.add(model);
+        scene.add(wrapper);
+        if (onLoaded) onLoaded(wrapper);
+    }, undefined, (e) => console.error(name + ':', e));
+}
+
 export function initUniqueModels(scene, loader, SPHERE_RADIUS) {
     cosSchoolGrassExclusion = Math.cos(SCHOOL_GRASS_RADIUS / SPHERE_RADIUS);
     schoolTooltipPos.copy(schoolNormal).multiplyScalar(SPHERE_RADIUS + UI_HEIGHT);
     gundamTooltipPos.copy(gundamNormal).multiplyScalar(SPHERE_RADIUS + UI_HEIGHT);
     theatreTooltipPos.copy(theatreNormal).multiplyScalar(SPHERE_RADIUS + UI_HEIGHT);
     githubTooltipPos.copy(githubNormal).multiplyScalar(SPHERE_RADIUS + UI_HEIGHT);
+    linkedinTooltipPos.copy(linkedinNormal).multiplyScalar(SPHERE_RADIUS + UI_HEIGHT);
 
     loader.load(schoolUrl, (gltf) => {
         const school = gltf.scene;
@@ -166,30 +214,15 @@ export function initUniqueModels(scene, loader, SPHERE_RADIUS) {
         gundamState = { idleModel, standUpModel, mixer, standUpAction, animPhase: 'idle' };
     }).catch((e) => console.error('gundam:', e));
 
-    loader.load(githubUrl, (gltf) => {
-        const model = gltf.scene;
+    loadLinkObject(scene, loader, SPHERE_RADIUS, {
+        url: githubUrl, scale: GITHUB_SCALE, height: GITHUB_HEIGHT,
+        normal: githubNormal, yaw: GITHUB_YAW, name: 'github',
+    }, (wrapper) => { githubModel = wrapper; if (_onGithubLoaded) _onGithubLoaded(wrapper); });
 
-        // Compute bbox center BEFORE scaling so we can offset correctly
-        const bbox   = new THREE.Box3().setFromObject(model);
-        const center = new THREE.Vector3();
-        bbox.getCenter(center);
-
-        // Offset model so its visual center sits at the group origin
-        model.scale.setScalar(GITHUB_SCALE);
-        model.position.sub(center.multiplyScalar(GITHUB_SCALE));
-        model.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
-
-        // Wrapper group is what gets positioned on the sphere and spun
-        const wrapper = new THREE.Group();
-        const alignQ  = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), githubNormal);
-        const yawQ    = new THREE.Quaternion().setFromAxisAngle(githubNormal, GITHUB_YAW);
-        wrapper.quaternion.copy(yawQ).multiply(alignQ);
-        wrapper.position.copy(githubNormal).multiplyScalar(SPHERE_RADIUS + GITHUB_HEIGHT);
-        wrapper.add(model);
-        scene.add(wrapper);
-        githubModel = wrapper;
-        if (_onGithubLoaded) _onGithubLoaded(wrapper);
-    }, undefined, (e) => console.error('github:', e));
+    loadLinkObject(scene, loader, SPHERE_RADIUS, {
+        url: linkedinUrl, scale: LINKEDIN_SCALE, height: LINKEDIN_HEIGHT,
+        normal: linkedinNormal, yaw: LINKEDIN_YAW, name: 'linkedin',
+    }, (wrapper) => { linkedinModel = wrapper; if (_onLinkedinLoaded) _onLinkedinLoaded(wrapper); });
 
     loader.load(theatreUrl, (gltf) => {
         const theatre = gltf.scene;
@@ -255,4 +288,9 @@ export function initTooltipCss3d(tooltipSystem, cssScene) {
     githubCss3d.scale.set(0.01, 0.01, 0.01);
     githubCss3d.position.copy(githubTooltipPos);
     cssScene.add(githubCss3d);
+
+    linkedinCss3d = new CSS3DObject(tooltipSystem.getElement('linkedin'));
+    linkedinCss3d.scale.set(0.01, 0.01, 0.01);
+    linkedinCss3d.position.copy(linkedinTooltipPos);
+    cssScene.add(linkedinCss3d);
 }

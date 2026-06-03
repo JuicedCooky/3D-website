@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
-import barrelUrl       from '../3d_models/objects/random_objects/barrel/barrel.glb?url';
-import barrelOpenUrl   from '../3d_models/objects/random_objects/barrel/barrel-open.glb?url';
-import boxUrl          from '../3d_models/objects/random_objects/box/box.glb?url';
-import boxLargeUrl     from '../3d_models/objects/random_objects/box/box-large.glb?url';
-import boxOpenUrl      from '../3d_models/objects/random_objects/box/box-open.glb?url';
-import boxLargeOpenUrl from '../3d_models/objects/random_objects/box/box-large-open.glb?url';
+import barrelUrl       from '../../3d_models/objects/random_objects/barrel/barrel.glb?url';
+import barrelOpenUrl   from '../../3d_models/objects/random_objects/barrel/barrel-open.glb?url';
+import boxUrl          from '../../3d_models/objects/random_objects/box/box.glb?url';
+import boxLargeUrl     from '../../3d_models/objects/random_objects/box/box-large.glb?url';
+import boxOpenUrl      from '../../3d_models/objects/random_objects/box/box-open.glb?url';
+import boxLargeOpenUrl from '../../3d_models/objects/random_objects/box/box-large-open.glb?url';
 
 export const RANDOM_OBJ_CLUSTERS         = 50;
 export const RANDOM_OBJ_SCALE            = 2.0;

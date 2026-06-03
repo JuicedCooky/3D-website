@@ -19,15 +19,18 @@ import {
     GITHUB_THETA, GITHUB_PHI,
     GITHUB_COLLISION_RADIUS, GITHUB_SPIN_SPEED, GITHUB_HEIGHT, GITHUB_NEAR_ARC_DIST,
     githubNormal, githubModel,
+    LINKEDIN_THETA, LINKEDIN_PHI,
+    LINKEDIN_COLLISION_RADIUS, LINKEDIN_SPIN_SPEED, LINKEDIN_HEIGHT, LINKEDIN_NEAR_ARC_DIST,
+    linkedinNormal, linkedinModel,
     UI_HEIGHT,
     gundamState,
-    schoolCss3d, gundamCss3d, theatreCss3d, githubCss3d,
+    schoolCss3d, gundamCss3d, theatreCss3d, githubCss3d, linkedinCss3d,
     schoolTooltipPos, gundamTooltipPos, theatreTooltipPos,
-    setGithubLoadedCallback,
+    setGithubLoadedCallback, setLinkedinLoadedCallback,
     initUniqueModels, initTooltipCss3d,
-} from './uniqueModels.js';
+} from './models/uniqueModels.js';
 
-import { initTheatreZoom } from './theatre.js';
+import { initTheatreZoom } from './models/theatre.js';
 
 import {
     RANDOM_OBJ_CLUSTERS, RANDOM_OBJ_COLLISION_RADIUS,
@@ -35,8 +38,9 @@ import {
     physicsObjects,
     spawnRandomObjects,
     initScatter,
-} from './scatter.js';
+} from './models/scatter.js';
 
+import { initOrbitModels, updateOrbitModels } from './models/orbitModels.js';
 import { initUI, createBuildingTooltipSystem, createBookPanel, initMusicPlayer, createTheatreSlideshow, createMiniMap } from './ui.js';
 import { initPhysics, PHYS_IMPULSE_STR } from './physics.js';
 
@@ -320,6 +324,9 @@ loader.load(grassUrl, (gltf) => {
 // ─── Unique models (school + gundam) ──────────────────────────────────────────
 initUniqueModels(scene, loader, SPHERE_RADIUS);
 
+// ─── Orbiting objects ─────────────────────────────────────────────────────────
+initOrbitModels(scene, loader);
+
 // ─── Random scatter objects ────────────────────────────────────────────────────
 initScatter(scene, loader, physicsWorld, objectMaterial, settings, SPHERE_RADIUS, schoolNormal);
 
@@ -356,6 +363,7 @@ const _lookAt = new THREE.Vector3();
 // ─── Character model ──────────────────────────────────────────────────────────
 let doro = null;
 let isMoving = false;
+let _musicStarted = false;
 let moveTime = 0;
 
 loader.load(walkUrl, (gltf) => {
@@ -541,7 +549,7 @@ initUI(settings, {
 });
 
 const musicPlayer = initMusicPlayer();
-const tooltipSystem = createBuildingTooltipSystem(['school', 'gundam', 'theatre', 'github']);
+const tooltipSystem = createBuildingTooltipSystem(['school', 'gundam', 'theatre', 'github', 'linkedin']);
 const bookPanel = createBookPanel();
 const theatreSlideshow = createTheatreSlideshow();
 
@@ -549,7 +557,8 @@ const miniMap = createMiniMap([
     { id: 'school',  label: 'School',  icon: '🏫', theta: SCHOOL_THETA,  phi: SCHOOL_PHI  },
     { id: 'gundam',  label: 'Gundam',  icon: '🤖', theta: GUNDAM_THETA,  phi: GUNDAM_PHI  },
     { id: 'theatre', label: 'Theatre', icon: '🎭', theta: THEATRE_THETA, phi: THEATRE_PHI },
-    { id: 'github',  label: 'GitHub',  icon: '🐙', theta: GITHUB_THETA,  phi: GITHUB_PHI  },
+    { id: 'github',   label: 'GitHub',   icon: '🐙', theta: GITHUB_THETA,   phi: GITHUB_PHI   },
+    { id: 'linkedin', label: 'LinkedIn', icon: '💼', theta: LINKEDIN_THETA, phi: LINKEDIN_PHI },
 ], {
     onTeleport(theta, phi) {
         const sinPhi = Math.sin(phi);
@@ -578,14 +587,19 @@ initTooltipCss3d(tooltipSystem, cssScene);
 let _currentArcDist        = Infinity;
 let _currentGundamArcDist  = Infinity;
 let _currentTheatreArcDist = Infinity;
-let _currentGithubArcDist  = Infinity;
+let _currentGithubArcDist   = Infinity;
+let _currentLinkedinArcDist = Infinity;
 
-// Tracks github body's current surface normal (updated after physics step)
-const _githubCurrentNormal = githubNormal.clone();
+const _githubCurrentNormal   = githubNormal.clone();
+const _linkedinCurrentNormal = linkedinNormal.clone();
 
 let githubPhysBody  = null;
 let githubColliding = false;
 let githubSpinning  = true;
+
+let linkedinPhysBody  = null;
+let linkedinColliding = false;
+let linkedinSpinning  = true;
 
 setGithubLoadedCallback(() => {
     const gp = githubNormal.clone().multiplyScalar(SPHERE_RADIUS + GITHUB_HEIGHT);
@@ -599,6 +613,20 @@ setGithubLoadedCallback(() => {
     githubPhysBody.position.set(gp.x, gp.y, gp.z);
     physicsWorld.addBody(githubPhysBody);
     githubPhysBody.sleep();
+});
+
+setLinkedinLoadedCallback(() => {
+    const lp = linkedinNormal.clone().multiplyScalar(SPHERE_RADIUS + LINKEDIN_HEIGHT);
+    linkedinPhysBody = new CANNON.Body({
+        mass: 1,
+        shape: new CANNON.Sphere(LINKEDIN_COLLISION_RADIUS * 0.65),
+        material: objectMaterial,
+        linearDamping:  0.4,
+        angularDamping: 0.8,
+    });
+    linkedinPhysBody.position.set(lp.x, lp.y, lp.z);
+    physicsWorld.addBody(linkedinPhysBody);
+    linkedinPhysBody.sleep();
 });
 
 
@@ -616,6 +644,10 @@ tooltipSystem.getElement('gundam').querySelector('.bld-tt-shell').addEventListen
 
 tooltipSystem.getElement('github').querySelector('.bld-tt-shell').addEventListener('click', () => {
     window.open('https://github.com/JuicedCooky', '_blank', 'noopener,noreferrer');
+});
+
+tooltipSystem.getElement('linkedin').querySelector('.bld-tt-shell').addEventListener('click', () => {
+    window.open('https://www.linkedin.com/in/alan-zheng-b64a9a217', '_blank', 'noopener,noreferrer');
 });
 
 const theatre = initTheatreZoom({
@@ -685,7 +717,7 @@ function animate() {
     if (moving !== isMoving) {
         isMoving = moving;
         doro.action.paused = !moving;
-        if (moving) musicPlayer.triggerPlay();
+        if (moving && !_musicStarted) { musicPlayer.triggerPlay(); _musicStarted = true; }
         else { doro.action.time = 0; doro.mixer.update(0); moveTime = 0; }
     }
 
@@ -743,6 +775,19 @@ function animate() {
         cam.baseDir.addScaledVector(_up, -cam.baseDir.dot(_up)).normalize();
     }
 
+    // ── LinkedIn collision ────────────────────────────────────────────────────
+    const linkedinArcDist = Math.acos(Math.max(-1, Math.min(1, _up.dot(_linkedinCurrentNormal)))) * SPHERE_RADIUS;
+    _currentLinkedinArcDist = linkedinArcDist;
+    const linkedinHit = linkedinArcDist < LINKEDIN_COLLISION_RADIUS && linkedinArcDist > 0.0001;
+    if (linkedinHit) {
+        _rotAxis.crossVectors(_linkedinCurrentNormal, _up).normalize();
+        _q.setFromAxisAngle(_rotAxis, LINKEDIN_COLLISION_RADIUS / SPHERE_RADIUS);
+        playerPos.copy(_linkedinCurrentNormal).multiplyScalar(SPHERE_RADIUS).applyQuaternion(_q).setLength(SPHERE_RADIUS);
+        _up.copy(playerPos).normalize();
+        facingDir.addScaledVector(_up, -facingDir.dot(_up)).normalize();
+        cam.baseDir.addScaledVector(_up, -cam.baseDir.dot(_up)).normalize();
+    }
+
     // ── Github physics – apply gravity before world step ─────────────────────
     if (githubPhysBody && githubPhysBody.sleepState < 2) {
         const gp = githubPhysBody.position;
@@ -750,6 +795,16 @@ function animate() {
         if (gl > 0.001) {
             const gs = -githubPhysBody.mass * 20 / gl;
             githubPhysBody.force.set(gp.x * gs, gp.y * gs, gp.z * gs);
+        }
+    }
+
+    // ── LinkedIn physics – apply gravity before world step ───────────────────
+    if (linkedinPhysBody && linkedinPhysBody.sleepState < 2) {
+        const lp = linkedinPhysBody.position;
+        const ll = lp.length();
+        if (ll > 0.001) {
+            const ls = -linkedinPhysBody.mass * 20 / ll;
+            linkedinPhysBody.force.set(lp.x * ls, lp.y * ls, lp.z * ls);
         }
     }
 
@@ -824,6 +879,43 @@ function animate() {
         githubColliding = githubHit;
     }
 
+    // ── LinkedIn post-step: ground clamp, position sync, collision impulse ────
+    if (linkedinPhysBody) {
+        if (linkedinPhysBody.sleepState !== 2) {
+            const lp  = linkedinPhysBody.position;
+            const ld  = SPHERE_RADIUS;
+            const ll  = lp.length();
+            if (ll < ld && ll > 0.001) {
+                const sc = ld / ll;
+                lp.x *= sc; lp.y *= sc; lp.z *= sc;
+                const nx = lp.x / ld, ny = lp.y / ld, nz = lp.z / ld;
+                const v  = linkedinPhysBody.velocity;
+                const vn = v.x*nx + v.y*ny + v.z*nz;
+                if (vn < 0) { v.x -= vn*nx; v.y -= vn*ny; v.z -= vn*nz; }
+            }
+            const ll2 = lp.length();
+            if (ll2 > 0.001) _linkedinCurrentNormal.set(lp.x/ll2, lp.y/ll2, lp.z/ll2);
+            if (linkedinModel) linkedinModel.position.set(lp.x, lp.y, lp.z);
+        }
+
+        if (linkedinHit && !linkedinColliding && linkedinPhysBody) {
+            linkedinSpinning = false;
+            linkedinPhysBody.wakeUp();
+            const objN = _linkedinCurrentNormal;
+            const dx = objN.x - _up.x, dy = objN.y - _up.y, dz = objN.z - _up.z;
+            const rc = dx*objN.x + dy*objN.y + dz*objN.z;
+            let tx = dx - objN.x*rc, ty = dy - objN.y*rc, tz = dz - objN.z*rc;
+            const tl = Math.sqrt(tx*tx + ty*ty + tz*tz);
+            if (tl > 0.001) { tx /= tl; ty /= tl; tz /= tl; }
+            linkedinPhysBody.applyImpulse(new CANNON.Vec3(
+                (tx * 0.7 + objN.x * 0.4) * PHYS_IMPULSE_STR,
+                (ty * 0.7 + objN.y * 0.4) * PHYS_IMPULSE_STR,
+                (tz * 0.7 + objN.z * 0.4) * PHYS_IMPULSE_STR,
+            ));
+        }
+        linkedinColliding = linkedinHit;
+    }
+
     // ── Orient model ──────────────────────────────────────────────────────────
     _right.crossVectors(_up, facingDir).normalize();
     _mat.makeBasis(_right, _up, facingDir);
@@ -838,6 +930,15 @@ function animate() {
         _q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), GITHUB_SPIN_SPEED * delta);
         githubModel.quaternion.multiply(_q).normalize();
     }
+
+    // ── LinkedIn spin — stops permanently on first player collision
+    if (linkedinModel && linkedinSpinning) {
+        _q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), LINKEDIN_SPIN_SPEED * delta);
+        linkedinModel.quaternion.multiply(_q).normalize();
+    }
+
+    // ── Orbiting objects ──────────────────────────────────────────────────────
+    updateOrbitModels(delta);
 
     // ── Camera position ───────────────────────────────────────────────────────
     if (theatre.isActive) {
@@ -862,7 +963,6 @@ function animate() {
     theatreCss3d.quaternion.copy(camera.quaternion);
     if (githubCss3d) {
         githubCss3d.quaternion.copy(camera.quaternion);
-        // Follow physics body if active, otherwise stay at static tooltip pos
         if (githubPhysBody) {
             const gp  = githubPhysBody.position;
             const gl  = Math.sqrt(gp.x*gp.x + gp.y*gp.y + gp.z*gp.z);
@@ -871,6 +971,20 @@ function animate() {
                     gp.x/gl * (gl + UI_HEIGHT),
                     gp.y/gl * (gl + UI_HEIGHT),
                     gp.z/gl * (gl + UI_HEIGHT),
+                );
+            }
+        }
+    }
+    if (linkedinCss3d) {
+        linkedinCss3d.quaternion.copy(camera.quaternion);
+        if (linkedinPhysBody) {
+            const lp  = linkedinPhysBody.position;
+            const ll  = Math.sqrt(lp.x*lp.x + lp.y*lp.y + lp.z*lp.z);
+            if (ll > 0.001) {
+                linkedinCss3d.position.set(
+                    lp.x/ll * (ll + UI_HEIGHT),
+                    lp.y/ll * (ll + UI_HEIGHT),
+                    lp.z/ll * (ll + UI_HEIGHT),
                 );
             }
         }
@@ -895,6 +1009,11 @@ function animate() {
             id: 'github',
             visible: _githubCurrentNormal.dot(camera.position) > 0,
             isNear:  _currentGithubArcDist < GITHUB_NEAR_ARC_DIST,
+        },
+        {
+            id: 'linkedin',
+            visible: _linkedinCurrentNormal.dot(camera.position) > 0,
+            isNear:  _currentLinkedinArcDist < LINKEDIN_NEAR_ARC_DIST,
         },
     ]);
 

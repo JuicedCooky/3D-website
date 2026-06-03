@@ -88,7 +88,7 @@ export function initCameraControls(domElement, settings, homePitch, initDist) {
     domElement.addEventListener('wheel', (e) => {
         e.preventDefault();
         if (cam.disabled) return;
-        cam.dist = Math.max(2, Math.min(20, cam.dist + e.deltaY * 0.01));
+        cam.dist = Math.max(2, Math.min(60, cam.dist + e.deltaY * 0.01));
     }, { passive: false });
 
     domElement.addEventListener('touchstart', (e) => {
@@ -111,7 +111,7 @@ export function initCameraControls(domElement, settings, homePitch, initDist) {
         e.preventDefault();
         if (e.touches.length >= 2 && pinchDist !== null) {
             const dist = pinchSep(e.touches);
-            cam.dist = Math.max(2, Math.min(20, cam.dist - (dist - pinchDist) * 0.02));
+            cam.dist = Math.max(2, Math.min(60, cam.dist - (dist - pinchDist) * 0.02));
             pinchDist = dist;
             return;
         }

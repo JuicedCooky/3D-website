@@ -1,6 +1,5 @@
 import * as THREE from 'three';
-import slide0Url from '../assets/slideshow/Screenshot 2026-05-09 042521.png?url';
-import thesisUrl from '../assets/slideshow/thesis2d.gif?url';
+import thesisUrl from '../../assets/slideshow/thesis2d.gif?url';
 import {
     theatreScreenMesh,
     theatreWorldQuaternion,
@@ -22,9 +21,9 @@ const SLIDES = [
         url: 'https://github.com/JuicedCooky/thesis',
     },
     {
-        title: 'Project Beta',
-        body: 'Explorations in reinforcement learning applied to game AI. The agent learns optimal pathing through a dynamic environment using Q-learning and policy gradient methods.',
-        url: 'https://github.com/JuicedCooky',
+        title: 'VR Simulations & Modelling Project',
+        body: 'Integrated rigid-body physics layers and custom collision mechanics to deliver a highly responsive, interactive VR sandbox environment. Built a dynamic joint and mechanical hinge infrastructure to fully support real-time, physics-calculated object construction workflows. Implemented foundational gameplay loop systems for resource gathering and inventory crafting using decoupled C# tool scripts. Created high-performance UI canvases to cleanly surface live telemetry concerning interactive tools, materials, and physics behaviors.',
+        url: 'https://youtu.be/fZhRE2zS_8c?si=ikuWX6DQCbJfq2kh',
     },
     {
         title: 'Project Gamma',
